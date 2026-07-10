@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>RobotMapPlanner</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">RobotMapPlanner</div>
+      <button class="nav active" data-page="import">地图导入</button>
+      <button class="nav" data-page="editor">地图编辑</button>
+      <button class="nav" data-page="planner">规划验证</button>
+      <button class="nav" data-page="versions">版本管理</button>
+      <div class="spacer"></div>
+      <div id="health" class="health">服务检查中</div>
+    </aside>
+    <main>
+      <header><div><h1>离线地图编辑与路径规划</h1><p id="summary">请选择或导入地图</p></div><div id="message" class="message"></div></header>
+      <section id="page-import" class="page">
+        <div class="grid two">
+          <article class="panel">
+            <h2>导入 PCD</h2>
+            <form id="import-form">
+              <label>地图名称<input id="map-name" value="global_map"></label>
+              <label>上传 PCD<input id="pcd-file" type="file" accept=".pcd"></label>
+              <label>或服务器路径<input id="source-path" placeholder="/data/imports/map.pcd"></label>
+              <div class="form-grid">
+                <label>分辨率(m)<input id="resolution" type="number" value="0.10" step="0.01"></label>
+                <label>障碍下限(m)<input id="z-min" type="number" value="0.15" step="0.05"></label>
+                <label>障碍上限(m)<input id="z-max" type="number" value="2.00" step="0.05"></label>
+                <label>每格最少点<input id="min-points" type="number" value="1" min="1"></label>
+                <label>硬净空(m)<input id="hard-clearance" type="number" value="0.25" step="0.05"></label>
+                <label>膨胀半径(m)<input id="inflation-radius" type="number" value="0.50" step="0.05"></label>
+                <label>代价衰减<input id="cost-scaling" type="number" value="5.0" step="0.5"></label>
+              </div>
+              <button class="primary" type="submit">导入并编译</button>
+            </form>
+          </article>
+          <article class="panel"><h2>地图列表</h2><div id="map-list" class="list"></div></article>
+        </div>
+      </section>
+      <section id="page-editor" class="page" hidden>
+        <div class="workspace">
+          <div class="toolbar panel">
+            <button id="create-draft" class="primary">创建草稿</button>
+            <select id="edit-mode">
+              <option value="occupied">补障碍</option><option value="free">清除误障碍</option><option value="inherit">恢复原值</option><option value="boundary">编辑边界</option>
+            </select>
+            <select id="edit-tool"><option value="brush">画刷</option><option value="rectangle">矩形</option></select>
+            <label>画刷<input id="brush-size" type="range" min="1" max="15" value="3"><span id="brush-value">3</span></label>
+            <button id="undo">撤销</button><button id="redo">重做</button>
+            <button id="validate">验证</button><button id="publish" class="success">发布</button>
+            <select id="editor-layer"><option value="final">最终占据</option><option value="base">基础占据</option><option value="overlay">人工覆盖</option><option value="costmap">代价地图</option></select>
+          </div>
+          <div class="canvas-card panel"><canvas id="editor-canvas"></canvas><div id="editor-meta" class="canvas-meta"></div></div>
+        </div>
+      </section>
+      <section id="page-planner" class="page" hidden>
+        <div class="workspace">
+          <div class="toolbar panel">
+            <button id="set-start" class="primary">点击设置起点</button><button id="set-goal" class="primary">点击设置终点</button>
+            <label>点间距(m)<input id="point-spacing" type="number" value="0.50" step="0.10"></label>
+            <label>吸附半径(m)<input id="snap-radius" type="number" value="0.50" step="0.10"></label>
+            <button id="run-plan" class="success">开始规划</button>
+          </div>
+          <div class="canvas-card panel"><canvas id="planner-canvas"></canvas><div id="plan-meta" class="canvas-meta">尚未规划</div></div>
+        </div>
+      </section>
+      <section id="page-versions" class="page" hidden><article class="panel"><h2>已发布版本</h2><div id="version-list" class="list"></div></article></section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

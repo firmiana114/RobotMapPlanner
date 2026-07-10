@@ -1,0 +1,14 @@
+services:
+  robot-map-planner:
+    build: .
+    image: ${RMP_IMAGE:-robot-map-planner:0.1.0}
+    container_name: robot-map-planner
+    network_mode: host
+    environment:
+      RMP_DATA_DIR: /data
+      RMP_IMPORT_ROOTS: /imports
+      RMP_PORT: 28200
+    volumes:
+      - ${RMP_DATA_DIR:-./data}:/data
+      - ${RMP_IMPORT_DIR:-./imports}:/imports:ro
+    restart: unless-stopped

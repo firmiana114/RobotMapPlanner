@@ -1,0 +1,10 @@
+/.venv/
+/build*/
+/data/
+/dist/
+/*.egg-info/
+/.pytest_cache/
+/**/__pycache__/
+*.py[cod]
+*.log
+/=2.13,
