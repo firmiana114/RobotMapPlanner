@@ -226,7 +226,9 @@ std::pair<double, double> GridToWorld(const GridMeta& meta, int x, int y) {
           meta.origin_y + (y + 0.5) * meta.resolution};
 }
 
-bool Traversable(std::uint8_t cost) { return cost < kInscribed; }
+bool Traversable(std::uint8_t cost, int max_cost = kInscribed - 1) {
+  return static_cast<int>(cost) <= max_cost;
+}
 
 std::vector<std::pair<int, int>> RasterLine(int x0, int y0, int x1, int y1) {
   std::vector<std::pair<int, int>> result;
@@ -239,6 +241,40 @@ std::vector<std::pair<int, int>> RasterLine(int x0, int y0, int x1, int y1) {
     const int twice = 2 * error;
     if (twice >= dy) { error += dy; x0 += sx; }
     if (twice <= dx) { error += dx; y0 += sy; }
+  }
+  return result;
+}
+
+std::vector<std::pair<int, int>> SupercoverLine(int x0, int y0, int x1, int y1) {
+  std::vector<std::pair<int, int>> result{{x0, y0}};
+  const int delta_x = x1 - x0;
+  const int delta_y = y1 - y0;
+  const int count_x = std::abs(delta_x);
+  const int count_y = std::abs(delta_y);
+  const int step_x = delta_x < 0 ? -1 : 1;
+  const int step_y = delta_y < 0 ? -1 : 1;
+  int crossed_x = 0;
+  int crossed_y = 0;
+  while (crossed_x < count_x || crossed_y < count_y) {
+    const std::int64_t compare_x = static_cast<std::int64_t>(1 + 2 * crossed_x) * count_y;
+    const std::int64_t compare_y = static_cast<std::int64_t>(1 + 2 * crossed_y) * count_x;
+    if (compare_x == compare_y) {
+      result.emplace_back(x0 + step_x, y0);
+      result.emplace_back(x0, y0 + step_y);
+      x0 += step_x;
+      y0 += step_y;
+      ++crossed_x;
+      ++crossed_y;
+      result.emplace_back(x0, y0);
+    } else if (compare_x < compare_y) {
+      x0 += step_x;
+      ++crossed_x;
+      result.emplace_back(x0, y0);
+    } else {
+      y0 += step_y;
+      ++crossed_y;
+      result.emplace_back(x0, y0);
+    }
   }
   return result;
 }
@@ -431,7 +467,9 @@ PlanResult PlanPath(
   PlanResult result;
   result.requested_start = start; result.requested_goal = goal;
   const std::size_t expected = static_cast<std::size_t>(meta.width) * meta.height;
-  if (costmap.size() != expected || config.snap_radius < 0.0 || config.point_spacing <= 0.0) {
+  if (costmap.size() != expected || config.snap_radius < 0.0 || config.point_spacing <= 0.0 ||
+      config.cost_weight < 0.0 || config.max_traversable_cost < 0 ||
+      config.max_traversable_cost >= kInscribed) {
     result.error_code = "INVALID_CONFIG"; result.message = "invalid planning parameters"; return result;
   }
   auto snap = [&](std::pair<double, double> world, const std::string& outside_code,
@@ -440,12 +478,15 @@ PlanResult PlanPath(
     if (!InBounds(meta, raw.first, raw.second)) {
       result.error_code = outside_code; result.message = "point is outside map bounds"; return false;
     }
-    if (Traversable(costmap[Index(meta, raw.first, raw.second)])) { output = raw; return true; }
+    if (Traversable(costmap[Index(meta, raw.first, raw.second)], config.max_traversable_cost)) {
+      output = raw; return true;
+    }
     const int radius = static_cast<int>(std::ceil(config.snap_radius / meta.resolution));
     double best = std::numeric_limits<double>::infinity();
     for (int dy = -radius; dy <= radius; ++dy) for (int dx = -radius; dx <= radius; ++dx) {
       const int x = raw.first + dx, y = raw.second + dy;
-      if (!InBounds(meta, x, y) || !Traversable(costmap[Index(meta, x, y)])) continue;
+      if (!InBounds(meta, x, y) ||
+          !Traversable(costmap[Index(meta, x, y)], config.max_traversable_cost)) continue;
       const double distance = std::hypot(dx * meta.resolution, dy * meta.resolution);
       if (distance <= config.snap_radius && distance < best) { best = distance; output = {x, y}; }
     }
@@ -502,10 +543,10 @@ PlanResult PlanPath(
       const int nx = x + dx[k], ny = y + dy[k];
       if (!InBounds(meta, nx, ny)) continue;
       const auto ni = Index(meta, nx, ny);
-      if (!Traversable(costmap[ni]) || closed[ni]) continue;
+      if (!Traversable(costmap[ni], config.max_traversable_cost) || closed[ni]) continue;
       if (dx[k] != 0 && dy[k] != 0 &&
-          (!Traversable(costmap[Index(meta, x + dx[k], y)]) ||
-           !Traversable(costmap[Index(meta, x, y + dy[k])]))) continue;
+          (!Traversable(costmap[Index(meta, x + dx[k], y)], config.max_traversable_cost) ||
+           !Traversable(costmap[Index(meta, x, y + dy[k])], config.max_traversable_cost))) continue;
       const std::int64_t candidate = g[current.index] + step_cost(dx[k], dy[k], costmap[ni]);
       if (candidate < g[ni]) {
         g[ni] = candidate; parent[ni] = static_cast<std::int64_t>(current.index);
@@ -528,11 +569,19 @@ PlanResult PlanPath(
         costmap[Index(meta, cell.first, cell.second)]);
   }
   auto line_cost = [&](const std::pair<int, int>& a, const std::pair<int, int>& b, bool& clear) {
+    const auto touched = SupercoverLine(a.first, a.second, b.first, b.second);
+    clear = true;
+    for (const auto& [x, y] : touched) {
+      if (!InBounds(meta, x, y) ||
+          !Traversable(costmap[Index(meta, x, y)], config.max_traversable_cost)) {
+        clear = false;
+        return std::int64_t{0};
+      }
+    }
     const auto line = RasterLine(a.first, a.second, b.first, b.second);
-    std::int64_t total = 0; clear = true;
+    std::int64_t total = 0;
     for (std::size_t i = 0; i < line.size(); ++i) {
       const auto [x, y] = line[i];
-      if (!InBounds(meta, x, y) || !Traversable(costmap[Index(meta, x, y)])) { clear = false; break; }
       if (i > 0) {
         total += step_cost(x - line[i - 1].first, y - line[i - 1].second,
                            costmap[Index(meta, x, y)]);
@@ -552,22 +601,20 @@ PlanResult PlanPath(
   std::vector<std::pair<double, double>> polyline;
   for (const auto& cell : sparse) polyline.push_back(GridToWorld(meta, cell.first, cell.second));
   result.points.push_back(polyline.front());
-  double carried = 0.0;
   for (std::size_t i = 1; i < polyline.size(); ++i) {
     auto a = polyline[i - 1], b = polyline[i];
     const double segment = std::hypot(b.first - a.first, b.second - a.second);
     result.length_m += segment;
-    double offset = config.point_spacing - carried;
+    double offset = config.point_spacing;
     while (offset < segment - 1e-9) {
       const double t = offset / segment;
       result.points.emplace_back(a.first + t * (b.first - a.first), a.second + t * (b.second - a.second));
       offset += config.point_spacing;
     }
-    carried = segment - (offset - config.point_spacing);
-    if (carried >= config.point_spacing - 1e-9) carried = 0.0;
+    if (std::hypot(result.points.back().first - b.first, result.points.back().second - b.second) > 1e-9) {
+      result.points.push_back(b);
+    }
   }
-  if (result.points.empty() || std::hypot(result.points.back().first - polyline.back().first,
-      result.points.back().second - polyline.back().second) > 1e-9) result.points.push_back(polyline.back());
   result.total_cost = static_cast<double>(g[goal_index]) * meta.resolution / kOrthogonalCost;
   result.ok = true; result.message = "path found";
   return result;

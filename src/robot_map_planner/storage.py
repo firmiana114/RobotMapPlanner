@@ -572,6 +572,7 @@ class MapStore:
             "snap_radius": float(request.get("snap_radius", 0.50)),
             "point_spacing": float(request.get("point_spacing", 0.50)),
             "cost_weight": float(request.get("cost_weight", 2.0)),
+            "max_traversable_cost": int(request.get("max_traversable_cost", 0)),
         }
         try:
             result = dict(_core.plan(costmap, meta, tuple(request["start"]), tuple(request["goal"]), config))
@@ -588,5 +589,5 @@ class MapStore:
         if not result["ok"]:
             LOGGER.info("Planning failed version_id=%s code=%s start=%s goal=%s elapsed_ms=%s", version_id, result["error_code"], request.get("start"), request.get("goal"), elapsed_ms)
             raise PlannerError(result["error_code"], result["message"], status_code=422)
-        LOGGER.info("Planned path version_id=%s start=%s goal=%s points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], request["goal"], len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
+        LOGGER.info("Planned path version_id=%s start=%s goal=%s max_traversable_cost=%s points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], request["goal"], config["max_traversable_cost"], len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
         return result

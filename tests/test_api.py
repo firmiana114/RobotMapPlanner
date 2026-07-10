@@ -44,3 +44,8 @@ def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
         grid = client.get(f"/api/v1/versions/{version_id}/grid/costmap")
         assert grid.status_code == 200
         assert "X-RMP-Meta" in grid.headers
+        invalid_threshold = client.post(
+            f"/api/v1/versions/{version_id}/plan",
+            json={"start": [1.0, 1.0], "goal": [2.0, 2.0], "max_traversable_cost": 253},
+        )
+        assert invalid_threshold.status_code == 422

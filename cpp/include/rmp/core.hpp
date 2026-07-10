@@ -61,6 +61,7 @@ struct PlanConfig {
   double snap_radius{0.50};
   double point_spacing{0.50};
   double cost_weight{2.0};
+  int max_traversable_cost{0};
 };
 
 struct PlanResult {

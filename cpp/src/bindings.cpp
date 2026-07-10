@@ -73,6 +73,7 @@ PYBIND11_MODULE(_core, module) {
     if (config.contains("snap_radius")) cfg.snap_radius = config["snap_radius"].cast<double>();
     if (config.contains("point_spacing")) cfg.point_spacing = config["point_spacing"].cast<double>();
     if (config.contains("cost_weight")) cfg.cost_weight = config["cost_weight"].cast<double>();
+    if (config.contains("max_traversable_cost")) cfg.max_traversable_cost = config["max_traversable_cost"].cast<int>();
     const auto value = rmp::PlanPath(FromBytes(costmap), Meta(meta), start, goal, cfg);
     py::dict result; result["ok"] = value.ok; result["error_code"] = value.error_code;
     result["message"] = value.message; result["requested_start"] = value.requested_start;

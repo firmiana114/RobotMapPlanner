@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -46,6 +47,43 @@ int main() {
   assert(plan.ok);
   assert(plan.points.size() >= 2);
   assert(plan.length_m > 1.5);
+
+  rmp::GridMeta threshold_meta{7, 5, 0.0, 0.0, 0.1, 0.0};
+  std::vector<std::uint8_t> threshold_costmap(35, rmp::kFree);
+  for (int y = 0; y < threshold_meta.height; ++y) {
+    threshold_costmap[static_cast<std::size_t>(y * threshold_meta.width + 3)] = 10;
+  }
+  rmp::PlanConfig strict_config{0.0, 0.05, 1.0, 0};
+  const auto strict_plan = rmp::PlanPath(
+      threshold_costmap, threshold_meta, {0.15, 0.25}, {0.55, 0.25}, strict_config);
+  assert(!strict_plan.ok);
+  assert(strict_plan.error_code == "NO_PATH");
+  auto permissive_config = strict_config;
+  permissive_config.max_traversable_cost = 10;
+  const auto permissive_plan = rmp::PlanPath(
+      threshold_costmap, threshold_meta, {0.15, 0.25}, {0.55, 0.25}, permissive_config);
+  assert(permissive_plan.ok);
+
+  rmp::GridMeta corner_meta{5, 5, 0.0, 0.0, 0.1, 0.0};
+  std::vector<std::uint8_t> corner_costmap(25, rmp::kFree);
+  corner_costmap[1] = rmp::kInscribed;
+  const auto corner_plan = rmp::PlanPath(
+      corner_costmap, corner_meta, {0.05, 0.05}, {0.45, 0.45}, strict_config);
+  assert(corner_plan.ok);
+  assert(corner_plan.length_m > std::hypot(0.4, 0.4) + 0.02);
+  for (std::size_t i = 1; i < corner_plan.points.size(); ++i) {
+    const auto a = corner_plan.points[i - 1];
+    const auto b = corner_plan.points[i];
+    const auto distance = std::hypot(b.first - a.first, b.second - a.second);
+    assert(distance <= strict_config.point_spacing + 1e-9);
+    const int samples = std::max(1, static_cast<int>(std::ceil(distance / 0.005)));
+    for (int sample = 0; sample <= samples; ++sample) {
+      const double ratio = static_cast<double>(sample) / samples;
+      const int x = static_cast<int>(std::floor((a.first + ratio * (b.first - a.first)) / 0.1));
+      const int y = static_cast<int>(std::floor((a.second + ratio * (b.second - a.second)) / 0.1));
+      assert(corner_costmap[static_cast<std::size_t>(y * corner_meta.width + x)] == rmp::kFree);
+    }
+  }
 
   std::filesystem::remove(path);
   std::cout << "rmp_core_tests passed\n";
