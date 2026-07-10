@@ -66,6 +66,8 @@ bash scripts/smoke_container.sh
 
 API 详细字段可以启动服务后查看 `/docs`。
 
+前端页面的完整操作步骤、参数说明和常见错误处理参见 `docs/FRONTEND_USER_GUIDE.md`。
+
 ## 当前边界
 
 - 支持 PCD v0.7 ASCII 和 binary XYZ；明确拒绝 `binary_compressed`。

@@ -17,6 +17,7 @@
 - `src/robot_map_planner/cli.py`：`import|validate|plan|serve` 统一命令，与 HTTP 共用同一 C++ 核心和存储层。
 - `tests/`、`cpp/tests/`：API/存储与 C++ 算法测试。
 - `Dockerfile`、`compose.yaml`、`scripts/`：CPU-only 双架构构建、运行和冒烟检查。
+- `docs/FRONTEND_USER_GUIDE.md`：前端导入、编辑、规划、版本管理与故障处理操作指南。
 
 ## 运行入口、配置与数据流
 
@@ -30,6 +31,7 @@
 ## 当前状态与已验证事实
 
 - 独立首版的核心、服务、Web、CLI、测试和容器交付已实现。
+- 已补充与 0.1.0 实际界面一致的中文前端操作文档，包括当前 WSL 部署路径和 Draft 使用限制。
 - CTest：1/1 通过；pytest：3/3 通过。浏览器验证完成 Draft 编辑、撤销、验证和图层刷新，控制台无错误。
 - 目标 PCD `/home/u12297/projects/global_map_20260708_124133.pcd` 的 SHA-256 为 `5c9919abac2ba74376720dbf0e5ff659fc9ce2d30846b4f7981715329f663502`，正确读取 243,037 点。
 - 默认参数生成 `751 x 942` 栅格；地面高度约 `-1.31602335 m`；基础占据统计为障碍 21,411、自由 418,055、未知 267,976。
