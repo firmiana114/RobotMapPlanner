@@ -58,11 +58,11 @@ robot-map-planner serve --host 0.0.0.0 --port 28200
 RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
 ```
 
-## 阻塞问题与下一步
+## 发布状态、阻塞问题与下一步
 
-- `https://github.com/WSH-WX/RobotMapPlanner.git` 尚无法访问，当前无 GitHub CLI/插件授权；本地提交和父项目本地 submodule 可完成，但远端创建与推送需要用户授权或创建仓库。
+- GitHub 公开仓库已创建：`https://github.com/firmiana114/RobotMapPlanner`；本地 `main` 以该仓库为 `origin`。
 - 当前没有 Orin SSH 地址、用户和认证配置；已完成 QEMU arm64 验证，原生 Orin 的性能、内存和端到端验收仍待执行。
-- 获得远端后推送独立提交，随后在父项目同步 submodule 远端；获得 Orin 访问后运行导入、编辑、发布、规划与资源指标验收。
+- 父项目应使用上述 GitHub 地址更新 submodule；获得 Orin 访问后运行导入、编辑、发布、规划与资源指标验收。
 
 ## 注意事项
 
