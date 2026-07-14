@@ -1,0 +1,19 @@
+[Unit]
+Description=RobotMapPlanner Web and API service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/mnt/ssd/gt/RobotMapPlanner
+Environment=PYTHONPATH=
+Environment=RMP_DATA_DIR=/mnt/ssd/gt/RobotMapPlanner/data
+Environment=RMP_IMPORT_ROOTS=/mnt/ssd/gt/RobotMapPlanner/imports
+Environment=RMP_HOST=0.0.0.0
+Environment=RMP_PORT=28200
+ExecStart=/mnt/ssd/gt/RobotMapPlanner/.venv/bin/robot-map-planner serve --host 0.0.0.0 --port 28200
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

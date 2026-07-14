@@ -50,6 +50,23 @@ bash scripts/smoke_container.sh
 
 镜像为 CPU-only，目标平台是 `linux/amd64` 和 NVIDIA Orin 使用的 `linux/arm64`。
 
+## AGX Orin 原生部署
+
+Orin 部署路径固定为 `/mnt/ssd/gt/RobotMapPlanner`，用户级 systemd 单元位于 `deploy/robot-map-planner.service`：
+
+```bash
+cd /mnt/ssd/gt/RobotMapPlanner
+python3 -m venv .venv
+env -u PYTHONPATH .venv/bin/pip install -e '.[test]'
+mkdir -p data imports ~/.config/systemd/user
+ln -sfn "$PWD/deploy/robot-map-planner.service" ~/.config/systemd/user/robot-map-planner.service
+loginctl enable-linger "$USER"
+systemctl --user daemon-reload
+systemctl --user enable --now robot-map-planner.service
+```
+
+服务监听 `0.0.0.0:28200`。使用 `systemctl --user status robot-map-planner.service` 检查状态，使用 `journalctl _SYSTEMD_USER_UNIT=robot-map-planner.service` 查看轮转日志。
+
 ## API
 
 - `POST /api/v1/maps/import`
@@ -81,4 +98,4 @@ API 详细字段可以启动服务后查看 `/docs`。
 - `/home/u12297/projects/global_map_20260708_124133.pcd`：243,037 点，生成 `751 x 942` 栅格。
 - amd64 原生与 arm64/QEMU 均完成导入、发布和规划；同一输入返回 137 个点，坐标最大差值小于 `1e-12 m`。
 - 普通占据编辑只重算变更包围盒及膨胀邻域；边界修改自动回退到完整代价地图编译。
-- 原生 Orin 验收尚需目标设备的 SSH 地址和认证信息。
+- AGX Orin `aarch64` 原生构建和 pytest 已通过，`http://192.168.1.21:28200` 已完成局域网访问验证。

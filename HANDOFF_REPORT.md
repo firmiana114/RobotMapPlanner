@@ -17,6 +17,7 @@
 - `src/robot_map_planner/cli.py`：`import|validate|plan|serve` 统一命令，与 HTTP 共用同一 C++ 核心和存储层。
 - `tests/`、`cpp/tests/`：API/存储与 C++ 算法测试。
 - `Dockerfile`、`compose.yaml`、`scripts/`：CPU-only 双架构构建、运行和冒烟检查。
+- `deploy/robot-map-planner.service`：AGX Orin `/mnt/ssd/gt/RobotMapPlanner` 原生部署的用户级 systemd 单元。
 - `docs/FRONTEND_USER_GUIDE.md`：前端导入、编辑、规划、版本管理与故障处理操作指南。
 
 ## 运行入口、配置与数据流
@@ -27,6 +28,7 @@
 - 数据流：PCD → 基础占据图 → Draft 覆盖层 → 最终占据图 → 代价地图 → A* → 简化及等距 XY 点位。
 - 元数据位于 `catalog.sqlite3`；不可变版本栅格采用带魔数、版本、原点、分辨率和尺寸的 row-major `uint8` 文件。
 - 关键依赖和构建配置位于 `pyproject.toml`、`CMakeLists.txt`、`Dockerfile`。
+- AGX Orin 运行入口为用户级 `robot-map-planner.service`，数据目录为项目下 `data/`，允许导入目录为项目下 `imports/`，服务地址为 `http://192.168.1.21:28200`。
 
 ## 当前状态与已验证事实
 
@@ -42,6 +44,7 @@
 - amd64 镜像原生通过健康检查；arm64 镜像以 Buildx/QEMU 构建并在 `aarch64` 容器完成导入和规划，约 65 ms。
 - amd64 与 arm64 的栅格尺寸、占据统计、点数、路径长度和累计代价一致；点坐标最大差值约 `7.1e-15 m`。
 - 普通栅格编辑执行局部代价地图重编译；边界修改执行完整重编译；测试验证局部结果与完整结果一致。
+- 已通过 `ssh agx-orin` 部署到 `/mnt/ssd/gt/RobotMapPlanner`：原生 `aarch64` 扩展构建成功，远端 pytest 6/6 通过，用户级 systemd 服务 enabled/active，`Linger=yes`，Orin 本机和 Windows 访问首页、静态资源及健康检查均为 HTTP 200。
 
 ## 日志与一致性
 
@@ -66,8 +69,9 @@ RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
 ## 发布状态、阻塞问题与下一步
 
 - GitHub 公开仓库已创建：`https://github.com/firmiana114/RobotMapPlanner`；本地 `main` 以该仓库为 `origin`。
-- 当前没有 Orin SSH 地址、用户和认证配置；已完成 QEMU arm64 验证，原生 Orin 的性能、内存和端到端验收仍待执行。
-- 父项目应使用上述 GitHub 地址更新 submodule；获得 Orin 访问后运行导入、编辑、发布、规划与资源指标验收。
+- AGX Orin SSH 别名为 `agx-orin`，主机地址为 `192.168.1.21`；源码、虚拟环境、数据和导入目录均位于 `/mnt/ssd/gt/RobotMapPlanner`。
+- Orin 无法直连 Docker Registry；本轮曾以 SSH 反向转发接入本机 7897 代理，但为避免修改共享 Docker 守护进程，最终采用原生 Python/systemd 部署。后续如需 Docker 构建，应继续使用反向代理或由管理员配置守护进程代理。
+- 原生 Orin 的页面与测试已验收；完整目标 PCD 的 Orin 导入、编辑、发布、规划性能和资源指标仍待执行。
 
 ## 注意事项
 
