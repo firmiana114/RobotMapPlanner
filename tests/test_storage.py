@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from robot_map_planner.errors import PlannerError
-from robot_map_planner.storage import MapStore, path_points_with_poses
+from robot_map_planner.storage import MapStore, path_points_with_poses, turning_points
 
 
 def configs() -> tuple[dict, dict]:
@@ -76,3 +76,11 @@ def test_path_points_include_planar_quaternion_and_mode() -> None:
     assert points[2]["ow"] == pytest.approx(1.0)
     assert points[-1]["oz"] == pytest.approx(-math.sqrt(0.5))
     assert points[-1]["ow"] == pytest.approx(math.sqrt(0.5))
+
+
+def test_turning_points_remove_duplicates_and_collinear_samples() -> None:
+    points = turning_points(
+        [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (1.0, 0.0), (1.0, 0.5), (1.0, 1.0)]
+    )
+
+    assert points == [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0)]

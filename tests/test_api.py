@@ -28,6 +28,7 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert 'id="start-yaw" type="number" value="0" step="1"' in html
     assert 'id="goal-yaw" type="number" value="0" step="1"' in html
     assert 'id="export-path" disabled' in html
+    assert 'id="point-spacing"' not in html
     assert "state.brush*2*scale" in app_js
     assert "state.editMode==='boundary'||state.editTool!=='brush'" in app_js
     assert "window.confirm" in app_js
@@ -36,6 +37,9 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert "start_yaw:state.startYaw" in app_js
     assert "goal_yaw:state.goalYaw" in app_js
     assert "JSON.stringify(state.path" in app_js
+    assert "quaternionYaw" in app_js
+    assert "state.path.slice(1,-1)" in app_js
+    assert "prominent:true" in app_js
     assert ".brush-cursor{" in styles
     assert ".danger{" in styles
 
@@ -64,7 +68,7 @@ def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
         )
         assert planned.status_code == 200, planned.text
         path = planned.json()["points"]
-        assert path
+        assert len(path) == 2
         assert all(set(point) == {"x", "y", "z", "ox", "oy", "oz", "ow", "mode"} for point in path)
         assert path[0]["oz"] == pytest.approx(math.sqrt(0.5))
         assert path[-1]["oz"] == pytest.approx(-math.sqrt(0.5))

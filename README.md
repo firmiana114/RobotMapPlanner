@@ -5,7 +5,7 @@ RobotMapPlanner 是一个离线 PCD 地图处理、Web 占据地图编辑、Nav2
 ## 数据链路
 
 ```text
-PCD → 基础占据地图 → Draft 覆盖编辑 → 发布版本 → 代价地图 → A* → 等距二维位姿点位
+PCD → 基础占据地图 → Draft 覆盖编辑 → 发布版本 → 代价地图 → A* → 转向位姿点位
 ```
 
 PCD 空白区域的语义为：自动凸包边界内无障碍点的栅格视为自由，边界外为未知。基础地图不可修改，人工修改以 `INHERIT/FORCE_FREE/FORCE_OCCUPIED` 覆盖层保存。
@@ -38,6 +38,7 @@ robot-map-planner --data-dir ./data plan ver_xxx --start 0 0 --start-yaw 0 \
 `--start-yaw` 和 `--goal-yaw` 使用弧度。HTTP API 与 CLI 输出的每个 `points` 元素都包含
 `x/y/z/ox/oy/oz/ow/mode`；二维规划固定 `z=ox=oy=0`，`oz/ow` 是 yaw 对应的四元数，
 `mode` 默认为 `1`。网页中的朝向输入使用角度，并可直接下载仅包含完整点位序列的 JSON 数组。
+最终输出会折叠重复点和同向共线采样点，只保留起点、实际转向点和终点；底层仍保留安全采样用于验证线段不会穿越障碍。
 
 ## Docker 与多架构
 

@@ -117,6 +117,7 @@ def path_points_with_poses(
     mode: int,
 ) -> list[dict[str, float | int]]:
     """Attach planar quaternion poses to an A* path without changing its geometry."""
+    points = turning_points(points)
     output: list[dict[str, float | int]] = []
     for index, point in enumerate(points):
         if index == 0:
@@ -138,6 +139,36 @@ def path_points_with_poses(
                 "mode": mode,
             }
         )
+    return output
+
+
+def turning_points(
+    points: list[tuple[float, float]] | list[list[float]],
+    *,
+    angular_tolerance: float = 1e-9,
+) -> list[tuple[float, float]]:
+    """Collapse duplicate and collinear samples while preserving every direction change."""
+    if not points:
+        return []
+    output = [(float(points[0][0]), float(points[0][1]))]
+    for index in range(1, len(points) - 1):
+        current = (float(points[index][0]), float(points[index][1]))
+        following = (float(points[index + 1][0]), float(points[index + 1][1]))
+        previous = output[-1]
+        incoming = (current[0] - previous[0], current[1] - previous[1])
+        outgoing = (following[0] - current[0], following[1] - current[1])
+        incoming_length = math.hypot(*incoming)
+        outgoing_length = math.hypot(*outgoing)
+        if incoming_length <= 1e-12:
+            continue
+        cross = abs(incoming[0] * outgoing[1] - incoming[1] * outgoing[0])
+        dot = incoming[0] * outgoing[0] + incoming[1] * outgoing[1]
+        if outgoing_length > 1e-12 and dot > 0.0 and cross <= angular_tolerance * incoming_length * outgoing_length:
+            continue
+        output.append(current)
+    last = (float(points[-1][0]), float(points[-1][1]))
+    if math.hypot(last[0] - output[-1][0], last[1] - output[-1][1]) > 1e-12:
+        output.append(last)
     return output
 
 
@@ -850,11 +881,12 @@ class MapStore:
         for key in ("requested_start", "requested_goal", "actual_start", "actual_goal"):
             value = result[key]
             result[key] = {"x": value[0], "y": value[1]}
+        sampled_point_count = len(result["points"])
         result["points"] = path_points_with_poses(
             result["points"], start_yaw=start_yaw, goal_yaw=goal_yaw, mode=mode
         )
         if not result["ok"]:
             LOGGER.info("Planning failed version_id=%s code=%s start=%s goal=%s elapsed_ms=%s", version_id, result["error_code"], request.get("start"), request.get("goal"), elapsed_ms)
             raise PlannerError(result["error_code"], result["message"], status_code=422)
-        LOGGER.info("Planned path version_id=%s start=%s start_yaw=%.6f goal=%s goal_yaw=%.6f mode=%s max_traversable_cost=%s points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], start_yaw, request["goal"], goal_yaw, mode, config["max_traversable_cost"], len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
+        LOGGER.info("Planned path version_id=%s start=%s start_yaw=%.6f goal=%s goal_yaw=%.6f mode=%s max_traversable_cost=%s sampled_points=%s turning_points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], start_yaw, request["goal"], goal_yaw, mode, config["max_traversable_cost"], sampled_point_count, len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
         return result
