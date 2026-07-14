@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -49,3 +50,29 @@ def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
             json={"start": [1.0, 1.0], "goal": [2.0, 2.0], "max_traversable_cost": 253},
         )
         assert invalid_threshold.status_code == 422
+
+
+def test_import_rejects_invalid_costmap_parameters_with_context(
+    tmp_path: Path, ascii_pcd: Path, caplog
+) -> None:
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
+    with TestClient(app) as client, caplog.at_level(logging.WARNING):
+        with ascii_pcd.open("rb") as stream:
+            response = client.post(
+                "/api/v1/maps/import",
+                data={
+                    "name": "invalid-costmap",
+                    "config_json": json.dumps({"hard_clearance": 0.25, "inflation_radius": 0.0}),
+                },
+                files={"file": ("map.pcd", stream, "application/octet-stream")},
+            )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": {
+            "code": "INVALID_CONFIG",
+            "message": "inflation_radius must be greater than or equal to hard_clearance (got 0.0 < 0.25)",
+        }
+    }
+    assert "Rejected map import" in caplog.text
+    assert "API request rejected" in caplog.text

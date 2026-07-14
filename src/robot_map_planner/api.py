@@ -66,7 +66,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.exception_handler(PlannerError)
-    async def planner_error_handler(_: Request, exc: PlannerError) -> JSONResponse:
+    async def planner_error_handler(request: Request, exc: PlannerError) -> JSONResponse:
+        LOGGER.warning(
+            "API request rejected method=%s path=%s code=%s message=%s",
+            request.method,
+            request.url.path,
+            exc.code,
+            exc,
+        )
         return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": str(exc)}})
 
     @app.exception_handler(Exception)
@@ -93,17 +100,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             config = json.loads(config_json)
         except json.JSONDecodeError as exc:
             raise PlannerError("INVALID_CONFIG", "config_json is not valid JSON") from exc
-        build_config = {
-            "resolution": float(config.get("resolution", 0.10)),
-            "obstacle_min_height": float(config.get("obstacle_min_height", 0.15)),
-            "obstacle_max_height": float(config.get("obstacle_max_height", 2.00)),
-            "min_points_per_cell": int(config.get("min_points_per_cell", 1)),
-        }
-        cost_config = {
-            "hard_clearance": float(config.get("hard_clearance", 0.25)),
-            "inflation_radius": float(config.get("inflation_radius", 0.50)),
-            "cost_scaling": float(config.get("cost_scaling", 5.0)),
-        }
+        try:
+            build_config = {
+                "resolution": float(config.get("resolution", 0.10)),
+                "obstacle_min_height": float(config.get("obstacle_min_height", 0.15)),
+                "obstacle_max_height": float(config.get("obstacle_max_height", 2.00)),
+                "min_points_per_cell": int(config.get("min_points_per_cell", 1)),
+            }
+            cost_config = {
+                "hard_clearance": float(config.get("hard_clearance", 0.25)),
+                "inflation_radius": float(config.get("inflation_radius", 0.50)),
+                "cost_scaling": float(config.get("cost_scaling", 5.0)),
+            }
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise PlannerError("INVALID_CONFIG", "map import parameters must be valid numbers") from exc
         temporary: Path | None = None
         if file is not None:
             suffix = Path(file.filename or "upload.pcd").suffix.lower()

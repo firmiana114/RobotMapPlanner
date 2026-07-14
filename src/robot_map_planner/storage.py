@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import hashlib
 import json
 import logging
+import math
 import os
 from pathlib import Path
 import shutil
@@ -22,6 +23,52 @@ LOGGER = logging.getLogger(__name__)
 GRID_HEADER = struct.Struct("<4sIii4dQ")
 GRID_MAGIC = b"RMP1"
 GRID_VERSION = 1
+
+
+def validate_import_config(build_config: dict[str, Any], cost_config: dict[str, Any]) -> None:
+    try:
+        resolution = float(build_config["resolution"])
+        obstacle_min_height = float(build_config["obstacle_min_height"])
+        obstacle_max_height = float(build_config["obstacle_max_height"])
+        min_points_per_cell = int(build_config["min_points_per_cell"])
+        hard_clearance = float(cost_config["hard_clearance"])
+        inflation_radius = float(cost_config["inflation_radius"])
+        cost_scaling = float(cost_config["cost_scaling"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise PlannerError("INVALID_CONFIG", "map import parameters must be valid numbers") from exc
+
+    finite_values = (
+        resolution,
+        obstacle_min_height,
+        obstacle_max_height,
+        hard_clearance,
+        inflation_radius,
+        cost_scaling,
+    )
+    if not all(math.isfinite(value) for value in finite_values):
+        raise PlannerError("INVALID_CONFIG", "map import parameters must be finite numbers")
+    if resolution <= 0.0:
+        raise PlannerError("INVALID_CONFIG", f"resolution must be greater than 0 (got {resolution})")
+    if obstacle_min_height > obstacle_max_height:
+        raise PlannerError(
+            "INVALID_CONFIG",
+            "obstacle_min_height must be less than or equal to obstacle_max_height "
+            f"(got {obstacle_min_height} > {obstacle_max_height})",
+        )
+    if min_points_per_cell < 1:
+        raise PlannerError(
+            "INVALID_CONFIG", f"min_points_per_cell must be at least 1 (got {min_points_per_cell})"
+        )
+    if hard_clearance < 0.0:
+        raise PlannerError("INVALID_CONFIG", f"hard_clearance must be at least 0 (got {hard_clearance})")
+    if inflation_radius < hard_clearance:
+        raise PlannerError(
+            "INVALID_CONFIG",
+            "inflation_radius must be greater than or equal to hard_clearance "
+            f"(got {inflation_radius} < {hard_clearance})",
+        )
+    if cost_scaling <= 0.0:
+        raise PlannerError("INVALID_CONFIG", f"cost_scaling must be greater than 0 (got {cost_scaling})")
 
 
 def utc_now() -> str:
@@ -164,6 +211,17 @@ class MapStore:
         cost_config: dict[str, Any],
     ) -> dict[str, Any]:
         started = datetime.now(timezone.utc)
+        try:
+            validate_import_config(build_config, cost_config)
+        except PlannerError as exc:
+            LOGGER.warning(
+                "Rejected map import code=%s build_config=%s cost_config=%s message=%s",
+                exc.code,
+                build_config,
+                cost_config,
+                exc,
+            )
+            raise
         map_id = new_id("map")
         map_dir = self.maps_dir / map_id
         source_copy = map_dir / "source" / source.name
@@ -181,6 +239,15 @@ class MapStore:
             validation = dict(_core.validate_grid(final, costmap, meta))
         except Exception as exc:
             shutil.rmtree(map_dir, ignore_errors=True)
+            LOGGER.error(
+                "Map import failed map_id=%s source_sha256=%s build_config=%s cost_config=%s error=%s",
+                map_id,
+                source_sha,
+                build_config,
+                cost_config,
+                exc,
+                exc_info=True,
+            )
             raise translate_core_error(exc) from exc
         obstacle_path = map_dir / "base" / "obstacles.rmp"
         write_grid(obstacle_path, obstacles, meta)

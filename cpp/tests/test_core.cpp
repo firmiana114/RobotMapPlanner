@@ -40,6 +40,16 @@ int main() {
   rmp::CostConfig cost_config{0.0, 0.15, 3.0};
   const auto costmap = rmp::BuildCostmap(grid, meta, cost_config);
   assert(costmap[10 * 20 + 10] == rmp::kOccupied);
+  auto invalid_cost_config = cost_config;
+  invalid_cost_config.inflation_radius = -0.1;
+  try {
+    static_cast<void>(rmp::BuildCostmap(grid, meta, invalid_cost_config));
+    assert(false && "invalid costmap parameters must be rejected");
+  } catch (const std::runtime_error& error) {
+    const std::string message = error.what();
+    assert(message.find("inflation_radius >= hard_clearance") != std::string::npos);
+    assert(message.find("0, -0.1, 3") != std::string::npos);
+  }
   const auto validation = rmp::ValidateGrid(grid, costmap, meta);
   assert(validation.connected_components == 1);
   rmp::PlanConfig plan_config{0.0, 0.2, 1.0};

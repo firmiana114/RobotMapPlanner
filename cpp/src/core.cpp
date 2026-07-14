@@ -376,9 +376,19 @@ std::vector<std::uint8_t> BuildCostmap(
     const std::vector<std::uint8_t>& final_grid, const GridMeta& meta,
     const CostConfig& config) {
   const std::size_t expected = static_cast<std::size_t>(meta.width) * meta.height;
-  if (final_grid.size() != expected || config.hard_clearance < 0.0 ||
+  if (final_grid.size() != expected) {
+    throw std::runtime_error(
+        "INVALID_CONFIG: costmap grid size does not match metadata");
+  }
+  if (!std::isfinite(config.hard_clearance) || !std::isfinite(config.inflation_radius) ||
+      !std::isfinite(config.cost_scaling) || config.hard_clearance < 0.0 ||
       config.inflation_radius < config.hard_clearance || config.cost_scaling <= 0.0) {
-    throw std::runtime_error("INVALID_CONFIG: invalid costmap parameters");
+    std::ostringstream message;
+    message << "INVALID_CONFIG: costmap requires finite hard_clearance >= 0, "
+               "inflation_radius >= hard_clearance, and cost_scaling > 0 (got "
+            << config.hard_clearance << ", " << config.inflation_radius << ", "
+            << config.cost_scaling << ")";
+    throw std::runtime_error(message.str());
   }
   std::vector<std::uint8_t> result(expected, kFree);
   const float infinity = std::numeric_limits<float>::infinity();
