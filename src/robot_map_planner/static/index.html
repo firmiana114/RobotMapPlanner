@@ -78,10 +78,13 @@
         <div class="workspace">
           <div class="toolbar panel">
             <button id="set-start" class="primary">点击设置起点</button><button id="set-goal" class="primary">点击设置终点</button>
+            <label>起点朝向(°)<input id="start-yaw" type="number" value="0" step="1"></label>
+            <label>终点朝向(°)<input id="goal-yaw" type="number" value="0" step="1"></label>
             <label>点间距(m)<input id="point-spacing" type="number" value="0.50" step="0.10"></label>
             <label>吸附半径(m)<input id="snap-radius" type="number" value="0.50" step="0.10"></label>
             <label>最大通行代价<input id="max-traversable-cost" type="number" value="0" min="0" max="252" step="1" title="0 表示禁止进入任何膨胀代价栅格"></label>
             <button id="run-plan" class="success">开始规划</button>
+            <button id="export-path" disabled>导出点位 JSON</button>
           </div>
           <div class="canvas-card panel"><canvas id="planner-canvas"></canvas><div id="plan-meta" class="canvas-meta">尚未规划</div></div>
         </div>

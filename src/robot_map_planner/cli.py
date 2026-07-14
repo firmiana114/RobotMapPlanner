@@ -12,6 +12,9 @@ from .errors import PlannerError
 from .storage import MapStore
 
 
+LOGGER = logging.getLogger(__name__)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="robot-map-planner")
     parser.add_argument("--data-dir", type=Path, default=None)
@@ -35,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     plan_parser.add_argument("version_id")
     plan_parser.add_argument("--start", type=float, nargs=2, required=True)
     plan_parser.add_argument("--goal", type=float, nargs=2, required=True)
+    plan_parser.add_argument("--start-yaw", type=float, default=0.0, help="start yaw in radians")
+    plan_parser.add_argument("--goal-yaw", type=float, default=0.0, help="goal yaw in radians")
+    plan_parser.add_argument("--mode", type=int, default=1, help="navigation mode attached to every point")
     plan_parser.add_argument("--point-spacing", type=float, default=0.50)
     plan_parser.add_argument("--snap-radius", type=float, default=0.50)
     plan_parser.add_argument("--output", type=Path)
@@ -77,13 +83,21 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "start": args.start,
                     "goal": args.goal,
+                    "start_yaw": args.start_yaw,
+                    "goal_yaw": args.goal_yaw,
+                    "mode": args.mode,
                     "point_spacing": args.point_spacing,
                     "snap_radius": args.snap_radius,
                 },
             )
             if args.output:
-                args.output.parent.mkdir(parents=True, exist_ok=True)
-                args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                try:
+                    args.output.parent.mkdir(parents=True, exist_ok=True)
+                    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+                except OSError as exc:
+                    LOGGER.exception("Failed to write planned path output=%s", args.output)
+                    raise PlannerError("OUTPUT_WRITE_FAILED", f"failed to write planned path: {args.output}") from exc
+                LOGGER.info("Wrote planned path output=%s points=%s", args.output, len(result["points"]))
         else:
             from .api import create_app
 
@@ -93,7 +107,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except PlannerError as exc:
-        logging.getLogger(__name__).error("Command failed code=%s message=%s", exc.code, exc)
+        LOGGER.error("Command failed code=%s message=%s", exc.code, exc)
         print(json.dumps({"error": {"code": exc.code, "message": str(exc)}}, ensure_ascii=False), file=sys.stderr)
         return 2
 

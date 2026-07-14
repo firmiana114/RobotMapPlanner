@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import pytest
 
 from robot_map_planner.api import create_app
 from robot_map_planner.config import Settings
@@ -23,11 +25,17 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert 'id="select-pcd-source"' in html
     assert 'id="config-form"' in html
     assert 'id="brush-cursor" class="brush-cursor"' in html
+    assert 'id="start-yaw" type="number" value="0" step="1"' in html
+    assert 'id="goal-yaw" type="number" value="0" step="1"' in html
+    assert 'id="export-path" disabled' in html
     assert "state.brush*2*scale" in app_js
     assert "state.editMode==='boundary'||state.editTool!=='brush'" in app_js
     assert "window.confirm" in app_js
     assert "method:'DELETE'" in app_js
     assert "data-delete-map" in app_js
+    assert "start_yaw:state.startYaw" in app_js
+    assert "goal_yaw:state.goalYaw" in app_js
+    assert "JSON.stringify(state.path" in app_js
     assert ".brush-cursor{" in styles
     assert ".danger{" in styles
 
@@ -45,6 +53,22 @@ def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
             )
         assert imported.status_code == 201, imported.text
         map_data = imported.json()
+        planned = client.post(
+            f"/api/v1/versions/{map_data['active_version_id']}/plan",
+            json={
+                "start": [1.0, 1.0],
+                "goal": [3.0, 1.0],
+                "start_yaw": math.pi / 2.0,
+                "goal_yaw": -math.pi / 2.0,
+            },
+        )
+        assert planned.status_code == 200, planned.text
+        path = planned.json()["points"]
+        assert path
+        assert all(set(point) == {"x", "y", "z", "ox", "oy", "oz", "ow", "mode"} for point in path)
+        assert path[0]["oz"] == pytest.approx(math.sqrt(0.5))
+        assert path[-1]["oz"] == pytest.approx(-math.sqrt(0.5))
+        assert all(point["mode"] == 1 for point in path)
         draft = client.post(f"/api/v1/maps/{map_data['id']}/drafts")
         assert draft.status_code == 201
         patched = client.patch(

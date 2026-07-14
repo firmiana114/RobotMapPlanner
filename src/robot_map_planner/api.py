@@ -36,6 +36,9 @@ class DraftPatch(BaseModel):
 class PlanRequest(BaseModel):
     start: tuple[float, float]
     goal: tuple[float, float]
+    start_yaw: float = 0.0
+    goal_yaw: float = 0.0
+    mode: int = 1
     snap_radius: float = Field(default=0.50, ge=0.0, le=10.0)
     point_spacing: float = Field(default=0.50, gt=0.0, le=20.0)
     cost_weight: float = Field(default=2.0, ge=0.0, le=100.0)

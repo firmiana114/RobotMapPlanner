@@ -109,6 +109,38 @@ def atomic_write(path: Path, data: bytes) -> None:
         raise
 
 
+def path_points_with_poses(
+    points: list[tuple[float, float]] | list[list[float]],
+    *,
+    start_yaw: float,
+    goal_yaw: float,
+    mode: int,
+) -> list[dict[str, float | int]]:
+    """Attach planar quaternion poses to an A* path without changing its geometry."""
+    output: list[dict[str, float | int]] = []
+    for index, point in enumerate(points):
+        if index == 0:
+            yaw = start_yaw
+        elif index == len(points) - 1:
+            yaw = goal_yaw
+        else:
+            next_point = points[index + 1]
+            yaw = math.atan2(float(next_point[1]) - float(point[1]), float(next_point[0]) - float(point[0]))
+        output.append(
+            {
+                "x": float(point[0]),
+                "y": float(point[1]),
+                "z": 0.0,
+                "ox": 0.0,
+                "oy": 0.0,
+                "oz": math.sin(yaw / 2.0),
+                "ow": math.cos(yaw / 2.0),
+                "mode": mode,
+            }
+        )
+    return output
+
+
 def write_grid(path: Path, data: bytes, meta: dict[str, Any]) -> None:
     expected = int(meta["width"]) * int(meta["height"])
     if len(data) != expected:
@@ -793,12 +825,20 @@ class MapStore:
         started = datetime.now(timezone.utc)
         row = self.get_version_row(version_id)
         costmap, meta = read_grid(Path(row["costmap_path"]))
-        config = {
-            "snap_radius": float(request.get("snap_radius", 0.50)),
-            "point_spacing": float(request.get("point_spacing", 0.50)),
-            "cost_weight": float(request.get("cost_weight", 2.0)),
-            "max_traversable_cost": int(request.get("max_traversable_cost", 0)),
-        }
+        try:
+            config = {
+                "snap_radius": float(request.get("snap_radius", 0.50)),
+                "point_spacing": float(request.get("point_spacing", 0.50)),
+                "cost_weight": float(request.get("cost_weight", 2.0)),
+                "max_traversable_cost": int(request.get("max_traversable_cost", 0)),
+            }
+            start_yaw = float(request.get("start_yaw", 0.0))
+            goal_yaw = float(request.get("goal_yaw", 0.0))
+            mode = int(request.get("mode", 1))
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise PlannerError("INVALID_CONFIG", "planning orientation and mode must be valid numbers") from exc
+        if not math.isfinite(start_yaw) or not math.isfinite(goal_yaw):
+            raise PlannerError("INVALID_CONFIG", "start_yaw and goal_yaw must be finite numbers")
         try:
             result = dict(_core.plan(costmap, meta, tuple(request["start"]), tuple(request["goal"]), config))
         except Exception as exc:
@@ -810,9 +850,11 @@ class MapStore:
         for key in ("requested_start", "requested_goal", "actual_start", "actual_goal"):
             value = result[key]
             result[key] = {"x": value[0], "y": value[1]}
-        result["points"] = [{"x": point[0], "y": point[1]} for point in result["points"]]
+        result["points"] = path_points_with_poses(
+            result["points"], start_yaw=start_yaw, goal_yaw=goal_yaw, mode=mode
+        )
         if not result["ok"]:
             LOGGER.info("Planning failed version_id=%s code=%s start=%s goal=%s elapsed_ms=%s", version_id, result["error_code"], request.get("start"), request.get("goal"), elapsed_ms)
             raise PlannerError(result["error_code"], result["message"], status_code=422)
-        LOGGER.info("Planned path version_id=%s start=%s goal=%s max_traversable_cost=%s points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], request["goal"], config["max_traversable_cost"], len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
+        LOGGER.info("Planned path version_id=%s start=%s start_yaw=%.6f goal=%s goal_yaw=%.6f mode=%s max_traversable_cost=%s points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], start_yaw, request["goal"], goal_yaw, mode, config["max_traversable_cost"], len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
         return result

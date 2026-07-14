@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import pytest
 
 from robot_map_planner.errors import PlannerError
-from robot_map_planner.storage import MapStore
+from robot_map_planner.storage import MapStore, path_points_with_poses
 
 
 def configs() -> tuple[dict, dict]:
@@ -53,3 +54,25 @@ def test_plan_reports_invalid_goal(tmp_path: Path, ascii_pcd: Path) -> None:
     with pytest.raises(PlannerError) as error:
         store.plan(imported["active_version_id"], {"start": [1.0, 1.0], "goal": [99.0, 99.0]})
     assert error.value.code == "GOAL_OUTSIDE"
+
+
+def test_path_points_include_planar_quaternion_and_mode() -> None:
+    points = path_points_with_poses(
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (2.0, 1.0)],
+        start_yaw=math.pi / 2.0,
+        goal_yaw=-math.pi / 2.0,
+        mode=1,
+    )
+
+    expected_fields = {"x", "y", "z", "ox", "oy", "oz", "ow", "mode"}
+    assert all(set(point) == expected_fields for point in points)
+    assert all(point["z"] == point["ox"] == point["oy"] == 0.0 for point in points)
+    assert all(point["mode"] == 1 for point in points)
+    assert points[0]["oz"] == pytest.approx(math.sqrt(0.5))
+    assert points[0]["ow"] == pytest.approx(math.sqrt(0.5))
+    assert points[1]["oz"] == pytest.approx(math.sqrt(0.5))
+    assert points[1]["ow"] == pytest.approx(math.sqrt(0.5))
+    assert points[2]["oz"] == pytest.approx(0.0)
+    assert points[2]["ow"] == pytest.approx(1.0)
+    assert points[-1]["oz"] == pytest.approx(-math.sqrt(0.5))
+    assert points[-1]["ow"] == pytest.approx(math.sqrt(0.5))
