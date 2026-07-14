@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from . import __version__
 from .config import Settings
 from .errors import PlannerError
+from .navigation import NavBridgeClient, NavBridgeError
 from .storage import MapStore
 
 
@@ -56,14 +57,38 @@ class RecompileMapRequest(BaseModel):
     cost_scaling: float = 5.0
 
 
+class NavigationPoint(BaseModel):
+    x: float
+    y: float
+    z: float = 0.0
+    ox: float
+    oy: float
+    oz: float
+    ow: float
+    mode: int = 1
+
+
+class FollowPathRequest(BaseModel):
+    version_id: str = Field(min_length=1)
+    points: list[NavigationPoint] = Field(min_length=2)
+
+
 def _is_allowed_source(path: Path, roots: tuple[Path, ...]) -> bool:
     resolved = path.expanduser().resolve()
     return any(resolved == root or root in resolved.parents for root in roots)
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, navigation_client: NavBridgeClient | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
     store = MapStore(settings.data_dir)
+    navigation_client = navigation_client or NavBridgeClient(
+        settings.nav_bridge_url,
+        request_timeout=settings.nav_request_timeout,
+        pose_timeout=settings.nav_pose_timeout,
+        waypoint_timeout=settings.nav_waypoint_timeout,
+        poll_interval=settings.nav_poll_interval,
+        start_tolerance=settings.nav_start_tolerance,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -76,6 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="RobotMapPlanner", version=__version__, lifespan=lifespan)
     app.state.settings = settings
     app.state.store = store
+    app.state.navigation_client = navigation_client
     static_dir = Path(__file__).parent / "static"
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -102,6 +128,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/healthz")
     async def healthz() -> dict[str, Any]:
         return {"status": "ok", "version": __version__, "architecture": platform.machine()}
+
+    @app.get("/api/v1/navigation/pose")
+    async def robot_pose() -> dict[str, Any]:
+        try:
+            return navigation_client.current_pose()
+        except NavBridgeError as exc:
+            raise PlannerError(exc.code, str(exc), status_code=exc.status_code) from exc
+
+    @app.get("/api/v1/navigation/execution")
+    async def navigation_execution() -> dict[str, Any]:
+        return navigation_client.execution_status()
+
+    @app.post("/api/v1/navigation/follow-path", status_code=202)
+    async def follow_path(payload: FollowPathRequest) -> dict[str, Any]:
+        LOGGER.info(
+            "Robot path execution requested version_id=%s point_count=%s",
+            payload.version_id,
+            len(payload.points),
+        )
+        try:
+            return navigation_client.start_path([point.model_dump() for point in payload.points])
+        except NavBridgeError as exc:
+            raise PlannerError(exc.code, str(exc), status_code=exc.status_code) from exc
 
     @app.post("/api/v1/maps/import", status_code=201)
     async def import_map(

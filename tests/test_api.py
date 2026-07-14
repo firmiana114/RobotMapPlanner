@@ -10,6 +10,22 @@ import pytest
 
 from robot_map_planner.api import create_app
 from robot_map_planner.config import Settings
+from robot_map_planner.navigation import NavBridgeError
+
+
+class FakeNavigationClient:
+    def __init__(self) -> None:
+        self.points = None
+
+    def current_pose(self):
+        return {"x": 1.25, "y": -0.5, "z": 0.0, "ox": 0.0, "oy": 0.0, "oz": 0.0, "ow": 1.0, "localized": True}
+
+    def execution_status(self):
+        return {"status": "idle", "current_waypoint": 0, "total_waypoints": 0}
+
+    def start_path(self, points):
+        self.points = points
+        return {"status": "queued", "current_waypoint": 0, "total_waypoints": len(points) - 1}
 
 
 def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
@@ -28,6 +44,7 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert 'id="start-yaw" type="number" value="0" step="1"' in html
     assert 'id="goal-yaw" type="number" value="0" step="1"' in html
     assert 'id="export-path" disabled' in html
+    assert 'id="follow-path" class="warning" disabled' in html
     assert 'id="point-spacing"' not in html
     assert "state.brush*2*scale" in app_js
     assert "state.editMode==='boundary'||state.editTool!=='brush'" in app_js
@@ -44,8 +61,48 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert "quaternionYaw" in app_js
     assert "state.path.slice(1,-1)" in app_js
     assert "prominent:true" in app_js
+    assert "/api/v1/navigation/pose" in app_js
+    assert "/api/v1/navigation/follow-path" in app_js
+    assert "error.code=body?.error?.code" in app_js
+    assert "机器人将按照当前规划路径实际移动" in app_js
     assert ".brush-cursor{" in styles
     assert ".danger{" in styles
+
+
+def test_navigation_api_uses_injected_client(tmp_path: Path) -> None:
+    navigation = FakeNavigationClient()
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200), navigation)
+    points = [
+        {"x": 1.25, "y": -0.5, "z": 0, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1},
+        {"x": 2.0, "y": -0.5, "z": 0, "ox": 0, "oy": 0, "oz": 0, "ow": 1, "mode": 1},
+    ]
+    with TestClient(app) as client:
+        pose = client.get("/api/v1/navigation/pose")
+        execution = client.get("/api/v1/navigation/execution")
+        follow = client.post(
+            "/api/v1/navigation/follow-path",
+            json={"version_id": "ver_test", "points": points},
+        )
+
+    assert pose.status_code == 200
+    assert pose.json()["localized"] is True
+    assert execution.json()["status"] == "idle"
+    assert follow.status_code == 202
+    assert follow.json()["status"] == "queued"
+    assert navigation.points == points
+
+
+def test_navigation_api_preserves_bridge_error_code(tmp_path: Path) -> None:
+    navigation = FakeNavigationClient()
+    navigation.current_pose = lambda: (_ for _ in ()).throw(
+        NavBridgeError("NAV_BRIDGE_OFFLINE", "NavBridge is offline", status_code=503)
+    )
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200), navigation)
+    with TestClient(app) as client:
+        response = client.get("/api/v1/navigation/pose")
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "NAV_BRIDGE_OFFLINE"
 
 
 def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:

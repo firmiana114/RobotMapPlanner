@@ -40,6 +40,8 @@ robot-map-planner --data-dir ./data plan ver_xxx --start 0 0 --start-yaw 0 \
 `mode` 默认为 `1`。网页中的朝向输入使用角度，并可直接下载仅包含完整点位序列的 JSON 数组。
 最终输出会折叠重复点和同向共线采样点，只保留起点、实际转向点和终点；底层仍保留安全采样用于验证线段不会穿越障碍。
 
+规划页面可复用同机 `RobotAbrainOffline` 的 NavBridge（默认 `http://127.0.0.1:28180`）：定位成功时“点击设置起点”直接读取 ROS2 `/current_pose`；规划完成后“按路径行走”会在安全确认和起点距离校验通过后，逐点调用 NavBridge。NavBridge 离线或没有定位消息时不会下发运动。
+
 ## Docker 与多架构
 
 ```bash
@@ -87,6 +89,9 @@ systemctl --user enable --now robot-map-planner.service
 - `GET /api/v1/drafts/{draft_id}/grid/{layer}`
 - `GET /api/v1/versions/{version_id}/tiles/{layer}/{x}/{y}`
 - `POST /api/v1/versions/{version_id}/plan`
+- `GET /api/v1/navigation/pose`
+- `GET /api/v1/navigation/execution`
+- `POST /api/v1/navigation/follow-path`
 - `GET /healthz`
 
 API 详细字段可以启动服务后查看 `/docs`。
@@ -96,7 +101,7 @@ API 详细字段可以启动服务后查看 `/docs`。
 ## 当前边界
 
 - 支持 PCD v0.7 ASCII 和 binary XYZ；明确拒绝 `binary_compressed`。
-- 只做静态二维地图和全局路径点位，不包含机器人、定位、SLAM、控制器、动态障碍和完整三维规划。
+- 地图和规划仍是静态二维能力；机器人执行仅桥接既有 NavBridge，不实现定位、SLAM、局部控制器、动态避障或完整三维规划。
 - 首版为单进程、单用户离线服务，不提供认证或多人协同。
 - 规划默认 `max_traversable_cost=0`，禁止进入完整膨胀代价区；可在 API 或规划页面显式提高阈值以启用软代价通行。
 
