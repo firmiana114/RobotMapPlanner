@@ -38,6 +38,7 @@
 - Web 导入参数已增加必填、数值范围和“膨胀半径不得小于硬净空”校验；API、存储层和 C++ 核心会返回包含字段和值的明确错误，不再仅返回 `invalid costmap parameters`。
 - 分辨率使用 `min=0.01, step=0.01`，代价衰减使用 `min=0.5, step=0.5`；两者的默认值均与 HTML 原生步进基准对齐，不会再触发“请输入有效值”提示。
 - 地图导入页采用“先选择 PCD 或已导入地图，再编辑参数”的两阶段流程；未选择来源时参数区禁用。已导入地图会回填原始参数，并通过 `/api/v1/maps/{map_id}/recompile` 从保存的源 PCD 生成新地图，保留原地图、版本和 Draft。
+- 编辑画布保留十字光标，并按画刷栅格半径和画布缩放比例实时显示跟随指针的圆形轮廓；矩形工具、边界模式或离开画布时自动隐藏。
 - 目标 PCD `/home/u12297/projects/global_map_20260708_124133.pcd` 的 SHA-256 为 `5c9919abac2ba74376720dbf0e5ff659fc9ce2d30846b4f7981715329f663502`，正确读取 243,037 点。
 - 默认参数生成 `751 x 942` 栅格；地面高度约 `-1.31602335 m`；基础占据统计为障碍 21,411、自由 418,055、未知 267,976。
 - 选定有效起终点的 amd64 规划输出 137 点、路径长约 `67.77794 m`、扩展 60,804 节点，主机规划约 18 ms。
@@ -70,6 +71,7 @@ RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
 
 - GitHub 公开仓库已创建：`https://github.com/firmiana114/RobotMapPlanner`；本地 `main` 以该仓库为 `origin`。
 - AGX Orin SSH 别名为 `agx-orin`，主机地址为 `192.168.1.21`；源码、虚拟环境、数据和导入目录均位于 `/mnt/ssd/gt/RobotMapPlanner`。
+- AGX Orin 是当前唯一运行服务器；本机 WSL 仅用于编辑、测试与 Git 提交，不应再启动 28200 服务。每次提交后必须同步 Orin 并重启 `robot-map-planner.service`。
 - Orin 无法直连 Docker Registry；本轮曾以 SSH 反向转发接入本机 7897 代理，但为避免修改共享 Docker 守护进程，最终采用原生 Python/systemd 部署。后续如需 Docker 构建，应继续使用反向代理或由管理员配置守护进程代理。
 - 原生 Orin 的页面与测试已验收；完整目标 PCD 的 Orin 导入、编辑、发布、规划性能和资源指标仍待执行。
 
