@@ -28,13 +28,13 @@
               <label>上传 PCD<input id="pcd-file" type="file" accept=".pcd"></label>
               <label>或服务器路径<input id="source-path" placeholder="/data/imports/map.pcd"></label>
               <div class="form-grid">
-                <label>分辨率(m)<input id="resolution" type="number" value="0.10" min="0.001" step="0.01" required></label>
+                <label>分辨率(m)<input id="resolution" type="number" value="0.10" min="0.01" step="0.01" required></label>
                 <label>障碍下限(m)<input id="z-min" type="number" value="0.15" step="0.05" required></label>
                 <label>障碍上限(m)<input id="z-max" type="number" value="2.00" step="0.05" required></label>
                 <label>每格最少点<input id="min-points" type="number" value="1" min="1" step="1" required></label>
                 <label>硬净空(m)<input id="hard-clearance" type="number" value="0.25" min="0" step="0.05" required></label>
                 <label>膨胀半径(m)<input id="inflation-radius" type="number" value="0.50" min="0" step="0.05" required></label>
-                <label>代价衰减<input id="cost-scaling" type="number" value="5.0" min="0.001" step="0.5" required></label>
+                <label>代价衰减<input id="cost-scaling" type="number" value="5.0" min="0.5" step="0.5" required></label>
               </div>
               <button class="primary" type="submit">导入并编译</button>
             </form>

@@ -10,6 +10,15 @@ from robot_map_planner.api import create_app
 from robot_map_planner.config import Settings
 
 
+def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
+    with TestClient(app) as client:
+        html = client.get("/").text
+
+    assert 'id="resolution" type="number" value="0.10" min="0.01" step="0.01"' in html
+    assert 'id="cost-scaling" type="number" value="5.0" min="0.5" step="0.5"' in html
+
+
 def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
     app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
     with TestClient(app) as client:
