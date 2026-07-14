@@ -25,7 +25,11 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert 'id="brush-cursor" class="brush-cursor"' in html
     assert "state.brush*2*scale" in app_js
     assert "state.editMode==='boundary'||state.editTool!=='brush'" in app_js
+    assert "window.confirm" in app_js
+    assert "method:'DELETE'" in app_js
+    assert "data-delete-map" in app_js
     assert ".brush-cursor{" in styles
+    assert ".danger{" in styles
 
 
 def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
@@ -96,7 +100,7 @@ def test_import_rejects_invalid_costmap_parameters_with_context(
     assert "API request rejected" in caplog.text
 
 
-def test_recompile_map_creates_new_map_from_saved_source(
+def test_recompile_map_replaces_saved_map_in_place(
     tmp_path: Path, ascii_pcd: Path, caplog
 ) -> None:
     app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
@@ -107,6 +111,8 @@ def test_recompile_map_creates_new_map_from_saved_source(
                 data={"name": "original"},
                 files={"file": ("map.pcd", stream, "application/octet-stream")},
             ).json()
+        draft = client.post(f"/api/v1/maps/{imported['id']}/drafts").json()
+        original_version_id = imported["active_version_id"]
         with caplog.at_level(logging.INFO):
             response = client.post(
                 f"/api/v1/maps/{imported['id']}/recompile",
@@ -122,14 +128,58 @@ def test_recompile_map_creates_new_map_from_saved_source(
                 },
             )
             maps = client.get("/api/v1/maps").json()
+            old_draft = client.get(f"/api/v1/drafts/{draft['id']}")
+            old_version = client.get(f"/api/v1/versions/{original_version_id}/grid/costmap")
+            invalid_recompile = client.post(
+                f"/api/v1/maps/{imported['id']}/recompile",
+                json={"name": "invalid", "hard_clearance": 0.50, "inflation_radius": 0.25},
+            )
+            after_invalid = client.get(f"/api/v1/maps/{imported['id']}").json()
 
-    assert response.status_code == 201, response.text
+    assert response.status_code == 200, response.text
     recompiled = response.json()
-    assert recompiled["id"] != imported["id"]
+    assert recompiled["id"] == imported["id"]
     assert recompiled["name"] == "recompiled"
     assert recompiled["source_sha256"] == imported["source_sha256"]
     assert recompiled["build_config"]["resolution"] == 0.20
     assert recompiled["cost_config"]["inflation_radius"] == 0.40
-    assert len(maps) == 2
+    assert recompiled["active_version_id"] != original_version_id
+    assert len(recompiled["versions"]) == 1
+    assert len(maps) == 1
+    assert old_draft.status_code == 404
+    assert old_version.status_code == 404
+    assert invalid_recompile.status_code == 400
+    assert after_invalid["active_version_id"] == recompiled["active_version_id"]
+    assert after_invalid["name"] == "recompiled"
+    assert sorted(path.name for path in (tmp_path / "data" / "maps").iterdir()) == [imported["id"]]
     assert "Recompiling map" in caplog.text
-    assert "Recompiled map" in caplog.text
+    assert "Recompiled map in place" in caplog.text
+    assert "replaced_versions=1 discarded_drafts=1" in caplog.text
+
+
+def test_delete_map_removes_metadata_and_files(tmp_path: Path, ascii_pcd: Path, caplog) -> None:
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
+    with TestClient(app) as client:
+        with ascii_pcd.open("rb") as stream:
+            imported = client.post(
+                "/api/v1/maps/import",
+                data={"name": "delete-me"},
+                files={"file": ("map.pcd", stream, "application/octet-stream")},
+            ).json()
+        draft = client.post(f"/api/v1/maps/{imported['id']}/drafts").json()
+        map_dir = tmp_path / "data" / "maps" / imported["id"]
+        assert map_dir.is_dir()
+        with caplog.at_level(logging.INFO):
+            response = client.delete(f"/api/v1/maps/{imported['id']}")
+            maps = client.get("/api/v1/maps").json()
+            deleted_map = client.get(f"/api/v1/maps/{imported['id']}")
+            deleted_draft = client.get(f"/api/v1/drafts/{draft['id']}")
+
+    assert response.status_code == 200
+    assert response.json() == {"deleted": True, "map_id": imported["id"]}
+    assert maps == []
+    assert deleted_map.status_code == 404
+    assert deleted_draft.status_code == 404
+    assert not map_dir.exists()
+    assert "Deleted map" in caplog.text
+    assert "versions=1 drafts=1" in caplog.text

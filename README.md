@@ -72,6 +72,7 @@ systemctl --user enable --now robot-map-planner.service
 - `POST /api/v1/maps/import`
 - `GET /api/v1/maps`
 - `POST /api/v1/maps/{map_id}/recompile`
+- `DELETE /api/v1/maps/{map_id}`
 - `POST /api/v1/maps/{map_id}/drafts`
 - `PATCH /api/v1/drafts/{draft_id}`
 - `POST /api/v1/drafts/{draft_id}/undo|redo|validate|publish`
