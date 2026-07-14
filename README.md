@@ -77,7 +77,7 @@ systemctl --user enable --now robot-map-planner.service
 
 - `POST /api/v1/maps/import`
 - `GET /api/v1/maps`
-- `POST /api/v1/maps/{map_id}/recompile`
+- `POST /api/v1/maps/{map_id}/recompile`（从已保存的原始 PCD 按新参数创建独立地图）
 - `DELETE /api/v1/maps/{map_id}`
 - `POST /api/v1/maps/{map_id}/drafts`
 - `PATCH /api/v1/drafts/{draft_id}`

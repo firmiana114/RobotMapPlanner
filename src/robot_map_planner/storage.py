@@ -392,99 +392,18 @@ class MapStore:
             raise PlannerError("MAP_NOT_READY", "saved source PCD is missing", status_code=500)
 
         LOGGER.info(
-            "Recompiling map in place map_id=%s build_config=%s cost_config=%s",
+            "Creating recompiled map copy source_map_id=%s name=%s build_config=%s cost_config=%s",
             map_id,
+            name,
             build_config,
             cost_config,
         )
-        staging = self.import_map(source, name=name, build_config=build_config, cost_config=cost_config)
-        staging_map_id = staging["id"]
-        staging_dir = self.maps_dir / staging_map_id
-        map_dir = self.maps_dir / map_id
-        backup_dir = self.maps_dir / f".{map_id}.recompile-{uuid.uuid4().hex}"
-        replaced_versions = 0
-        discarded_drafts = 0
-        try:
-            if not map_dir.is_dir() or not staging_dir.is_dir():
-                raise PlannerError("MAP_NOT_READY", "map storage directory is missing", status_code=500)
-            os.replace(map_dir, backup_dir)
-            try:
-                os.replace(staging_dir, map_dir)
-            except Exception:
-                os.replace(backup_dir, map_dir)
-                raise
-            try:
-                with self.connect() as connection:
-                    original = connection.execute("SELECT * FROM maps WHERE id=?", (map_id,)).fetchone()
-                    staged = connection.execute("SELECT * FROM maps WHERE id=?", (staging_map_id,)).fetchone()
-                    staged_versions = connection.execute(
-                        "SELECT * FROM versions WHERE map_id=? ORDER BY number", (staging_map_id,)
-                    ).fetchall()
-                    if original is None or staged is None or not staged_versions:
-                        raise PlannerError("MAP_NOT_READY", "staged map metadata is missing", status_code=500)
-                    replaced_versions = connection.execute(
-                        "SELECT COUNT(*) FROM versions WHERE map_id=?", (map_id,)
-                    ).fetchone()[0]
-                    discarded_drafts = connection.execute(
-                        "SELECT COUNT(*) FROM drafts WHERE map_id=?", (map_id,)
-                    ).fetchone()[0]
-                    connection.execute("UPDATE maps SET active_version_id=NULL WHERE id=?", (map_id,))
-                    connection.execute("DELETE FROM drafts WHERE map_id=?", (map_id,))
-                    connection.execute("DELETE FROM versions WHERE map_id=?", (map_id,))
-                    for version in staged_versions:
-                        promoted_paths = [
-                            str(map_dir / Path(version[column]).relative_to(staging_dir))
-                            for column in ("overlay_path", "base_path", "final_path", "costmap_path")
-                        ]
-                        connection.execute(
-                            "UPDATE versions SET map_id=?, overlay_path=?, base_path=?, final_path=?, costmap_path=? "
-                            "WHERE id=?",
-                            (map_id, *promoted_paths, version["id"]),
-                        )
-                    source_path = str(map_dir / Path(staged["source_path"]).relative_to(staging_dir))
-                    obstacle_path = str(map_dir / Path(staged["obstacle_path"]).relative_to(staging_dir))
-                    connection.execute(
-                        "UPDATE maps SET name=?, source_sha256=?, source_path=?, obstacle_path=?, meta_json=?, "
-                        "active_version_id=? WHERE id=?",
-                        (
-                            staged["name"],
-                            staged["source_sha256"],
-                            source_path,
-                            obstacle_path,
-                            staged["meta_json"],
-                            staged["active_version_id"],
-                            map_id,
-                        ),
-                    )
-                    connection.execute("DELETE FROM maps WHERE id=?", (staging_map_id,))
-            except Exception:
-                os.replace(map_dir, staging_dir)
-                os.replace(backup_dir, map_dir)
-                raise
-        except Exception as exc:
-            LOGGER.exception(
-                "Map recompile failed map_id=%s staging_map_id=%s error=%s",
-                map_id,
-                staging_map_id,
-                exc,
-            )
-            try:
-                self.delete_map(staging_map_id)
-            except Exception:
-                LOGGER.exception("Failed to clean staged map staging_map_id=%s", staging_map_id)
-            raise
-
-        try:
-            shutil.rmtree(backup_dir)
-        except Exception:
-            LOGGER.exception("Failed to remove recompile backup map_id=%s backup_dir=%s", map_id, backup_dir)
-        result = self.get_map(map_id)
+        result = self.import_map(source, name=name, build_config=build_config, cost_config=cost_config)
         LOGGER.info(
-            "Recompiled map in place map_id=%s version_id=%s replaced_versions=%s discarded_drafts=%s",
+            "Created recompiled map copy source_map_id=%s new_map_id=%s version_id=%s",
             map_id,
+            result["id"],
             result["active_version_id"],
-            replaced_versions,
-            discarded_drafts,
         )
         return result
 

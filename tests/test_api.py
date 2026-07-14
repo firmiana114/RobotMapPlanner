@@ -34,6 +34,10 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert "window.confirm" in app_js
     assert "method:'DELETE'" in app_js
     assert "data-delete-map" in app_js
+    assert "formatTimestamp(map.created_at)" in app_js
+    assert "按参数创建新地图" in app_js
+    assert "原地图保持不变" in app_js
+    assert "直接覆盖当前地图" not in app_js
     assert "start_yaw:state.startYaw" in app_js
     assert "goal_yaw:state.goalYaw" in app_js
     assert "JSON.stringify(state.path" in app_js
@@ -128,7 +132,7 @@ def test_import_rejects_invalid_costmap_parameters_with_context(
     assert "API request rejected" in caplog.text
 
 
-def test_recompile_map_replaces_saved_map_in_place(
+def test_recompile_map_creates_copy_and_preserves_original(
     tmp_path: Path, ascii_pcd: Path, caplog
 ) -> None:
     app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
@@ -156,33 +160,38 @@ def test_recompile_map_replaces_saved_map_in_place(
                 },
             )
             maps = client.get("/api/v1/maps").json()
-            old_draft = client.get(f"/api/v1/drafts/{draft['id']}")
-            old_version = client.get(f"/api/v1/versions/{original_version_id}/grid/costmap")
+            preserved_draft = client.get(f"/api/v1/drafts/{draft['id']}")
+            preserved_version = client.get(f"/api/v1/versions/{original_version_id}/grid/costmap")
             invalid_recompile = client.post(
                 f"/api/v1/maps/{imported['id']}/recompile",
                 json={"name": "invalid", "hard_clearance": 0.50, "inflation_radius": 0.25},
             )
-            after_invalid = client.get(f"/api/v1/maps/{imported['id']}").json()
+            preserved_original = client.get(f"/api/v1/maps/{imported['id']}").json()
 
-    assert response.status_code == 200, response.text
+    assert response.status_code == 201, response.text
     recompiled = response.json()
-    assert recompiled["id"] == imported["id"]
+    assert recompiled["id"] != imported["id"]
     assert recompiled["name"] == "recompiled"
     assert recompiled["source_sha256"] == imported["source_sha256"]
     assert recompiled["build_config"]["resolution"] == 0.20
     assert recompiled["cost_config"]["inflation_radius"] == 0.40
     assert recompiled["active_version_id"] != original_version_id
     assert len(recompiled["versions"]) == 1
-    assert len(maps) == 1
-    assert old_draft.status_code == 404
-    assert old_version.status_code == 404
+    assert recompiled["created_at"] != imported["created_at"]
+    assert len(maps) == 2
+    assert preserved_draft.status_code == 200
+    assert preserved_version.status_code == 200
     assert invalid_recompile.status_code == 400
-    assert after_invalid["active_version_id"] == recompiled["active_version_id"]
-    assert after_invalid["name"] == "recompiled"
-    assert sorted(path.name for path in (tmp_path / "data" / "maps").iterdir()) == [imported["id"]]
-    assert "Recompiling map" in caplog.text
-    assert "Recompiled map in place" in caplog.text
-    assert "replaced_versions=1 discarded_drafts=1" in caplog.text
+    assert preserved_original["active_version_id"] == original_version_id
+    assert preserved_original["name"] == "original"
+    assert len(preserved_original["versions"]) == 1
+    assert sorted(path.name for path in (tmp_path / "data" / "maps").iterdir()) == sorted(
+        [imported["id"], recompiled["id"]]
+    )
+    assert "Creating recompiled map copy" in caplog.text
+    assert "Created recompiled map copy" in caplog.text
+    assert f"source_map_id={imported['id']}" in caplog.text
+    assert f"new_map_id={recompiled['id']}" in caplog.text
 
 
 def test_delete_map_removes_metadata_and_files(tmp_path: Path, ascii_pcd: Path, caplog) -> None:

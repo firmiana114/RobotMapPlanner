@@ -161,7 +161,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def get_map(map_id: str) -> dict[str, Any]:
         return store.get_map(map_id)
 
-    @app.post("/api/v1/maps/{map_id}/recompile")
+    @app.post("/api/v1/maps/{map_id}/recompile", status_code=201)
     async def recompile_map(map_id: str, payload: RecompileMapRequest) -> dict[str, Any]:
         values = payload.model_dump()
         name = values.pop("name").strip()
