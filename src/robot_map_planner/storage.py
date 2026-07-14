@@ -115,9 +115,11 @@ def path_points_with_poses(
     start_yaw: float,
     goal_yaw: float,
     mode: int,
+    simplify: bool = True,
 ) -> list[dict[str, float | int]]:
     """Attach planar quaternion poses to an A* path without changing its geometry."""
-    points = turning_points(points)
+    if simplify:
+        points = turning_points(points)
     output: list[dict[str, float | int]] = []
     for index, point in enumerate(points):
         if index == 0:
@@ -789,23 +791,87 @@ class MapStore:
             raise PlannerError("INVALID_CONFIG", "planning orientation and mode must be valid numbers") from exc
         if not math.isfinite(start_yaw) or not math.isfinite(goal_yaw):
             raise PlannerError("INVALID_CONFIG", "start_yaw and goal_yaw must be finite numbers")
-        try:
-            result = dict(_core.plan(costmap, meta, tuple(request["start"]), tuple(request["goal"]), config))
-        except Exception as exc:
-            raise translate_core_error(exc) from exc
+        requested_waypoints = [tuple(point) for point in request.get("waypoints", [])]
+        route_points = [tuple(request["start"]), *requested_waypoints, tuple(request["goal"])]
+        leg_results: list[dict[str, Any]] = []
+        combined_points: list[tuple[float, float]] = []
+        sampled_point_count = 0
+        for leg_index, (leg_start, leg_goal) in enumerate(zip(route_points, route_points[1:]), start=1):
+            try:
+                leg = dict(_core.plan(costmap, meta, leg_start, leg_goal, config))
+            except Exception as exc:
+                raise translate_core_error(exc) from exc
+            if not leg["ok"]:
+                elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+                LOGGER.info(
+                    "Planning route leg failed version_id=%s leg=%s/%s code=%s start=%s goal=%s elapsed_ms=%s",
+                    version_id,
+                    leg_index,
+                    len(route_points) - 1,
+                    leg["error_code"],
+                    leg_start,
+                    leg_goal,
+                    elapsed_ms,
+                )
+                raise PlannerError(
+                    leg["error_code"],
+                    f"途径路线第 {leg_index} 段规划失败：{leg['message']}",
+                    status_code=422,
+                )
+            sampled_point_count += len(leg["points"])
+            leg_turns = turning_points(leg["points"])
+            if combined_points and leg_turns:
+                if math.hypot(
+                    combined_points[-1][0] - leg_turns[0][0],
+                    combined_points[-1][1] - leg_turns[0][1],
+                ) <= 1e-12:
+                    leg_turns = leg_turns[1:]
+            combined_points.extend(leg_turns)
+            leg_results.append(leg)
         elapsed_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        first_leg, last_leg = leg_results[0], leg_results[-1]
+        result = {
+            "ok": True,
+            "error_code": "",
+            "message": "path planned",
+            "points": combined_points,
+            "requested_start": first_leg["requested_start"],
+            "requested_goal": last_leg["requested_goal"],
+            "actual_start": first_leg["actual_start"],
+            "actual_goal": last_leg["actual_goal"],
+            "requested_waypoints": requested_waypoints,
+            "actual_waypoints": [leg["actual_goal"] for leg in leg_results[:-1]],
+            "length_m": sum(float(leg["length_m"]) for leg in leg_results),
+            "total_cost": sum(float(leg["total_cost"]) for leg in leg_results),
+            "expanded_nodes": sum(int(leg["expanded_nodes"]) for leg in leg_results),
+            "legs": [
+                {
+                    "index": index,
+                    "actual_start": leg["actual_start"],
+                    "actual_goal": leg["actual_goal"],
+                    "length_m": float(leg["length_m"]),
+                    "expanded_nodes": int(leg["expanded_nodes"]),
+                }
+                for index, leg in enumerate(leg_results, start=1)
+            ],
+        }
         result["planning_ms"] = elapsed_ms
         result["map_id"] = row["map_id"]
         result["version_id"] = version_id
         for key in ("requested_start", "requested_goal", "actual_start", "actual_goal"):
             value = result[key]
             result[key] = {"x": value[0], "y": value[1]}
-        sampled_point_count = len(result["points"])
+        result["requested_waypoints"] = [
+            {"x": point[0], "y": point[1]} for point in result["requested_waypoints"]
+        ]
+        result["actual_waypoints"] = [
+            {"x": point[0], "y": point[1]} for point in result["actual_waypoints"]
+        ]
+        for leg in result["legs"]:
+            leg["actual_start"] = {"x": leg["actual_start"][0], "y": leg["actual_start"][1]}
+            leg["actual_goal"] = {"x": leg["actual_goal"][0], "y": leg["actual_goal"][1]}
         result["points"] = path_points_with_poses(
-            result["points"], start_yaw=start_yaw, goal_yaw=goal_yaw, mode=mode
+            result["points"], start_yaw=start_yaw, goal_yaw=goal_yaw, mode=mode, simplify=False
         )
-        if not result["ok"]:
-            LOGGER.info("Planning failed version_id=%s code=%s start=%s goal=%s elapsed_ms=%s", version_id, result["error_code"], request.get("start"), request.get("goal"), elapsed_ms)
-            raise PlannerError(result["error_code"], result["message"], status_code=422)
-        LOGGER.info("Planned path version_id=%s start=%s start_yaw=%.6f goal=%s goal_yaw=%.6f mode=%s max_traversable_cost=%s sampled_points=%s turning_points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], start_yaw, request["goal"], goal_yaw, mode, config["max_traversable_cost"], sampled_point_count, len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
+        LOGGER.info("Planned ordered route version_id=%s start=%s start_yaw=%.6f waypoints=%s goal=%s goal_yaw=%.6f legs=%s mode=%s max_traversable_cost=%s sampled_points=%s turning_points=%s length_m=%.3f expanded=%s elapsed_ms=%s", version_id, request["start"], start_yaw, len(requested_waypoints), request["goal"], goal_yaw, len(leg_results), mode, config["max_traversable_cost"], sampled_point_count, len(result["points"]), result["length_m"], result["expanded_nodes"], elapsed_ms)
         return result

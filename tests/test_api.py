@@ -45,6 +45,10 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert 'id="goal-yaw" type="number" value="0" step="1"' in html
     assert 'id="export-path" disabled' in html
     assert 'id="follow-path" class="warning" disabled' in html
+    assert 'id="add-waypoint" class="primary"' in html
+    assert 'id="undo-waypoint" disabled' in html
+    assert 'id="clear-waypoints" disabled' in html
+    assert 'id="waypoint-count"' in html
     assert 'id="point-spacing"' not in html
     assert "state.brush*2*scale" in app_js
     assert "state.editMode==='boundary'||state.editTool!=='brush'" in app_js
@@ -65,6 +69,9 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert "/api/v1/navigation/follow-path" in app_js
     assert "error.code=body?.error?.code" in app_js
     assert "机器人将按照当前规划路径实际移动" in app_js
+    assert "waypoints:state.waypoints" in app_js
+    assert "result.actual_waypoints" in app_js
+    assert "drawRouteWaypoint" in app_js
     assert ".brush-cursor{" in styles
     assert ".danger{" in styles
 
@@ -134,6 +141,24 @@ def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
         assert path[0]["oz"] == pytest.approx(math.sqrt(0.5))
         assert path[-1]["oz"] == pytest.approx(-math.sqrt(0.5))
         assert all(point["mode"] == 1 for point in path)
+        routed = client.post(
+            f"/api/v1/versions/{map_data['active_version_id']}/plan",
+            json={"start": [1.0, 1.0], "waypoints": [[2.0, 1.0]], "goal": [3.0, 1.0]},
+        )
+        assert routed.status_code == 200, routed.text
+        route = routed.json()
+        assert len(route["legs"]) == 2
+        assert route["requested_waypoints"] == [{"x": 2.0, "y": 1.0}]
+        assert len(route["actual_waypoints"]) == 1
+        actual_waypoint = route["actual_waypoints"][0]
+        waypoint_indexes = [
+            index
+            for index, point in enumerate(route["points"])
+            if point["x"] == pytest.approx(actual_waypoint["x"])
+            and point["y"] == pytest.approx(actual_waypoint["y"])
+        ]
+        assert waypoint_indexes
+        assert 0 < waypoint_indexes[0] < len(route["points"]) - 1
         draft = client.post(f"/api/v1/maps/{map_data['id']}/drafts")
         assert draft.status_code == 201
         patched = client.patch(

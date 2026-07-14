@@ -77,7 +77,12 @@
       <section id="page-planner" class="page" hidden>
         <div class="workspace">
           <div class="toolbar panel">
-            <button id="set-start" class="primary">点击设置起点</button><button id="set-goal" class="primary">点击设置终点</button>
+            <button id="set-start" class="primary">点击设置起点</button>
+            <button id="add-waypoint" class="primary">添加途径点</button>
+            <button id="undo-waypoint" disabled>撤销途径点</button>
+            <button id="clear-waypoints" disabled>清空途径点</button>
+            <span id="waypoint-count" class="hint">途径点 0</span>
+            <button id="set-goal" class="primary">点击设置终点</button>
             <label>起点朝向(°)<input id="start-yaw" type="number" value="0" step="1"></label>
             <label>终点朝向(°)<input id="goal-yaw" type="number" value="0" step="1"></label>
             <label>吸附半径(m)<input id="snap-radius" type="number" value="0.50" step="0.10"></label>

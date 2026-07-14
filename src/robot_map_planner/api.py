@@ -37,6 +37,7 @@ class DraftPatch(BaseModel):
 class PlanRequest(BaseModel):
     start: tuple[float, float]
     goal: tuple[float, float]
+    waypoints: list[tuple[float, float]] = Field(default_factory=list, max_length=50)
     start_yaw: float = 0.0
     goal_yaw: float = 0.0
     mode: int = 1

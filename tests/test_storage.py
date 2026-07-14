@@ -78,6 +78,22 @@ def test_path_points_include_planar_quaternion_and_mode() -> None:
     assert points[-1]["ow"] == pytest.approx(math.sqrt(0.5))
 
 
+def test_path_points_can_preserve_collinear_order_constraints() -> None:
+    points = path_points_with_poses(
+        [(0.0, 0.0), (1.0, 0.0), (2.0, 0.0)],
+        start_yaw=0.0,
+        goal_yaw=0.0,
+        mode=1,
+        simplify=False,
+    )
+
+    assert [(point["x"], point["y"]) for point in points] == [
+        (0.0, 0.0),
+        (1.0, 0.0),
+        (2.0, 0.0),
+    ]
+
+
 def test_turning_points_remove_duplicates_and_collinear_samples() -> None:
     points = turning_points(
         [(0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (1.0, 0.0), (1.0, 0.5), (1.0, 1.0)]
