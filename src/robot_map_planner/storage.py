@@ -311,6 +311,33 @@ class MapStore:
         )
         return self.get_map(map_id)
 
+    def recompile_map(
+        self,
+        map_id: str,
+        *,
+        name: str,
+        build_config: dict[str, Any],
+        cost_config: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self.connect() as connection:
+            row = connection.execute("SELECT source_path FROM maps WHERE id=?", (map_id,)).fetchone()
+        if row is None:
+            raise PlannerError("MAP_NOT_READY", "map not found", status_code=404)
+        source = Path(row["source_path"])
+        if not source.is_file():
+            LOGGER.error("Cannot recompile map map_id=%s because source PCD is missing", map_id)
+            raise PlannerError("MAP_NOT_READY", "saved source PCD is missing", status_code=500)
+
+        LOGGER.info(
+            "Recompiling map source_map_id=%s build_config=%s cost_config=%s",
+            map_id,
+            build_config,
+            cost_config,
+        )
+        result = self.import_map(source, name=name, build_config=build_config, cost_config=cost_config)
+        LOGGER.info("Recompiled map source_map_id=%s new_map_id=%s", map_id, result["id"])
+        return result
+
     def list_maps(self) -> list[dict[str, Any]]:
         with self.connect() as connection:
             rows = connection.execute("SELECT * FROM maps ORDER BY created_at DESC").fetchall()

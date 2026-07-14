@@ -22,11 +22,27 @@
       <section id="page-import" class="page">
         <div class="grid two">
           <article class="panel">
+            <div class="step-label">步骤 1 · 选择地图</div>
             <h2>导入 PCD</h2>
-            <form id="import-form">
-              <label>地图名称<input id="map-name" value="global_map"></label>
+            <div>
               <label>上传 PCD<input id="pcd-file" type="file" accept=".pcd"></label>
               <label>或服务器路径<input id="source-path" placeholder="/data/imports/map.pcd"></label>
+              <button id="select-pcd-source" class="primary" type="button">选择此 PCD</button>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="step-label">步骤 1 · 选择地图</div>
+            <h2>已导入地图列表</h2>
+            <div id="map-list" class="list"></div>
+          </article>
+        </div>
+        <article id="config-panel" class="panel config-panel">
+          <div class="step-label">步骤 2 · 编辑参数</div>
+          <h2>地图参数</h2>
+          <div id="selected-source" class="selection-summary">请先选择一个 PCD 或已导入地图</div>
+          <form id="config-form">
+            <fieldset id="config-fields" disabled>
+              <label>地图名称<input id="map-name" value="global_map" required maxlength="200"></label>
               <div class="form-grid">
                 <label>分辨率(m)<input id="resolution" type="number" value="0.10" min="0.01" step="0.01" required></label>
                 <label>障碍下限(m)<input id="z-min" type="number" value="0.15" step="0.05" required></label>
@@ -36,11 +52,11 @@
                 <label>膨胀半径(m)<input id="inflation-radius" type="number" value="0.50" min="0" step="0.05" required></label>
                 <label>代价衰减<input id="cost-scaling" type="number" value="5.0" min="0.5" step="0.5" required></label>
               </div>
-              <button class="primary" type="submit">导入并编译</button>
-            </form>
-          </article>
-          <article class="panel"><h2>地图列表</h2><div id="map-list" class="list"></div></article>
-        </div>
+              <p id="compile-hint" class="hint"></p>
+              <button id="compile-map" class="success" type="submit">导入并编译</button>
+            </fieldset>
+          </form>
+        </article>
       </section>
       <section id="page-editor" class="page" hidden>
         <div class="workspace">

@@ -42,6 +42,17 @@ class PlanRequest(BaseModel):
     max_traversable_cost: int = Field(default=0, ge=0, le=252)
 
 
+class RecompileMapRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
+    resolution: float = 0.10
+    obstacle_min_height: float = 0.15
+    obstacle_max_height: float = 2.00
+    min_points_per_cell: int = 1
+    hard_clearance: float = 0.25
+    inflation_radius: float = 0.50
+    cost_scaling: float = 5.0
+
+
 def _is_allowed_source(path: Path, roots: tuple[Path, ...]) -> bool:
     resolved = path.expanduser().resolve()
     return any(resolved == root or root in resolved.parents for root in roots)
@@ -146,6 +157,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/v1/maps/{map_id}")
     async def get_map(map_id: str) -> dict[str, Any]:
         return store.get_map(map_id)
+
+    @app.post("/api/v1/maps/{map_id}/recompile", status_code=201)
+    async def recompile_map(map_id: str, payload: RecompileMapRequest) -> dict[str, Any]:
+        values = payload.model_dump()
+        name = values.pop("name").strip()
+        if not name:
+            raise PlannerError("INVALID_CONFIG", "map name must not be blank")
+        build_config = {
+            key: values[key]
+            for key in ("resolution", "obstacle_min_height", "obstacle_max_height", "min_points_per_cell")
+        }
+        cost_config = {
+            key: values[key]
+            for key in ("hard_clearance", "inflation_radius", "cost_scaling")
+        }
+        return store.recompile_map(
+            map_id,
+            name=name,
+            build_config=build_config,
+            cost_config=cost_config,
+        )
 
     @app.post("/api/v1/maps/{map_id}/drafts", status_code=201)
     async def create_draft(map_id: str) -> dict[str, Any]:

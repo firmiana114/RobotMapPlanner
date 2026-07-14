@@ -17,6 +17,9 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
 
     assert 'id="resolution" type="number" value="0.10" min="0.01" step="0.01"' in html
     assert 'id="cost-scaling" type="number" value="5.0" min="0.5" step="0.5"' in html
+    assert '<fieldset id="config-fields" disabled>' in html
+    assert 'id="select-pcd-source"' in html
+    assert 'id="config-form"' in html
 
 
 def test_api_workflow(tmp_path: Path, ascii_pcd: Path) -> None:
@@ -85,3 +88,42 @@ def test_import_rejects_invalid_costmap_parameters_with_context(
     }
     assert "Rejected map import" in caplog.text
     assert "API request rejected" in caplog.text
+
+
+def test_recompile_map_creates_new_map_from_saved_source(
+    tmp_path: Path, ascii_pcd: Path, caplog
+) -> None:
+    app = create_app(Settings(tmp_path / "data", (tmp_path,), "127.0.0.1", 28200))
+    with TestClient(app) as client:
+        with ascii_pcd.open("rb") as stream:
+            imported = client.post(
+                "/api/v1/maps/import",
+                data={"name": "original"},
+                files={"file": ("map.pcd", stream, "application/octet-stream")},
+            ).json()
+        with caplog.at_level(logging.INFO):
+            response = client.post(
+                f"/api/v1/maps/{imported['id']}/recompile",
+                json={
+                    "name": "recompiled",
+                    "resolution": 0.20,
+                    "obstacle_min_height": 0.10,
+                    "obstacle_max_height": 1.50,
+                    "min_points_per_cell": 1,
+                    "hard_clearance": 0.20,
+                    "inflation_radius": 0.40,
+                    "cost_scaling": 4.0,
+                },
+            )
+            maps = client.get("/api/v1/maps").json()
+
+    assert response.status_code == 201, response.text
+    recompiled = response.json()
+    assert recompiled["id"] != imported["id"]
+    assert recompiled["name"] == "recompiled"
+    assert recompiled["source_sha256"] == imported["source_sha256"]
+    assert recompiled["build_config"]["resolution"] == 0.20
+    assert recompiled["cost_config"]["inflation_radius"] == 0.40
+    assert len(maps) == 2
+    assert "Recompiling map" in caplog.text
+    assert "Recompiled map" in caplog.text
