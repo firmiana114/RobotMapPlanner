@@ -13,7 +13,7 @@
 - `cpp/`：轻量 PCD ASCII/binary 解析、地面估计、凸包、占据投影、覆盖融合、代价地图、地图验证、无穿角 A*、视线简化和等距重采样。
 - `src/robot_map_planner/storage.py`：SQLite 元数据、`RMP1` little-endian 栅格文件、原子写入、Draft revision、撤销/重做、发布、激活和规划入口。
 - `src/robot_map_planner/api.py`：FastAPI HTTP API、统一错误码、健康检查和静态网页。
-- `src/robot_map_planner/navigation.py`：RobotAbrainOffline NavBridge 健康检查、ROS2 当前位姿读取、起点安全校验和逐点路径执行状态机。
+- `src/robot_map_planner/navigation.py`：RobotAbrainOffline NavBridge 健康检查、HTTP 当前位姿读取、起点安全校验和逐点路径执行状态机。
 - `src/robot_map_planner/static/`：深蓝离线 Web 编辑器，支持画刷、矩形、边界控制点、图层切换、版本、验证、发布和规划显示。
 - `src/robot_map_planner/cli.py`：`import|validate|plan|serve` 统一命令，与 HTTP 共用同一 C++ 核心和存储层。
 - `tests/`、`cpp/tests/`：API/存储与 C++ 算法测试。
@@ -36,14 +36,14 @@
 
 - 独立首版的核心、服务、Web、CLI、测试和容器交付已实现。
 - 已补充与 0.1.0 实际界面一致的中文前端操作文档，包括当前 WSL 部署路径和 Draft 使用限制。
-- 本机与 Orin 的 CTest 均为 1/1 通过、pytest 均为 15/15 通过。Orin 首页、导航按钮 DOM、健康接口和 NavBridge 离线错误保护已通过真实 HTTP 验证；浏览器自动化仍因 `process` 属性冲突无法初始化，JavaScript 可视交互验收未完成。
+- 本机与 Orin 的 CTest 均为 1/1、pytest 均为 17/17 通过。Orin `GET /api/v1/navigation/pose` 已通过 NavBridge HTTP 返回 `localized=true` 的实时七元组；浏览器自动化仍因 `process` 属性冲突无法初始化，JavaScript 可视交互验收未完成。
 - Web 导入参数已增加必填、数值范围和“膨胀半径不得小于硬净空”校验；API、存储层和 C++ 核心会返回包含字段和值的明确错误，不再仅返回 `invalid costmap parameters`。
 - 分辨率使用 `min=0.01, step=0.01`，代价衰减使用 `min=0.5, step=0.5`；两者的默认值均与 HTML 原生步进基准对齐，不会再触发“请输入有效值”提示。
 - 地图导入页采用“先选择 PCD 或已导入地图，再编辑参数”的两阶段流程；未选择来源时参数区禁用。已导入地图会回填原始参数、默认追加“ `_参数版本` ”名称，并通过 `/api/v1/maps/{map_id}/recompile` 从保存的原始 PCD 创建独立地图；原地图、版本、Draft 和人工编辑保持不变。列表显示本地化创建时间，并提供带确认弹窗的删除按钮。
 - 编辑画布保留十字光标，并按画刷栅格半径和画布缩放比例实时显示跟随指针的圆形轮廓；矩形工具、边界模式或离开画布时自动隐藏。
 - 规划页可分别设置起点和终点朝向（角度），画布以箭头实时显示方向。规划 API/CLI 使用弧度；首尾点使用指定 yaw，中间点使用当前点指向下一点的路径切线 yaw。
 - HTTP、CLI 和网页导出的每个路径点均包含 `x/y/z/ox/oy/oz/ow/mode`；二维约束固定 `z=ox=oy=0`，`oz=sin(yaw/2)`、`ow=cos(yaw/2)`，`mode` 默认 `1`。网页可下载仅包含完整点位序列的 JSON 数组。
-- 规划页已接入 RobotAbrainOffline NavBridge：定位成功时设置起点直接读取 ROS2 `/current_pose`；离线或未定位自动回退地图点击。规划路径经确认和 `0.75 m` 起点距离校验后，从第二点开始逐点调用 `/go_to_async` 并轮询 `/go_to_status`，前端显示执行进度和失败码。
+- 规划页已接入 RobotAbrainOffline NavBridge：定位成功时通过 NavBridge HTTP `/current_pose` 读取容器内 ROS2 位姿，避免依赖 Orin 宿主 ROS2 CLI/DDS；离线、未定位或位姿过期自动回退地图点击。规划路径经确认和 `0.75 m` 起点距离校验后，从第二点开始逐点调用 `/go_to_async` 并轮询 `/go_to_status`，前端显示执行进度和失败码。
 - 最终输出会删除重复点和同向共线采样点，只保留起点、方向变化点和终点；前端为每个点显示序号和朝向箭头，起终点使用更大的高对比圆环、箭头和文字。底层等距采样仍用于线段安全验证，不直接作为机器人点位导出。
 - 目标 PCD `/home/u12297/projects/global_map_20260708_124133.pcd` 的 SHA-256 为 `5c9919abac2ba74376720dbf0e5ff659fc9ce2d30846b4f7981715329f663502`，正确读取 243,037 点。
 - 默认参数生成 `751 x 942` 栅格；地面高度约 `-1.31602335 m`；基础占据统计为障碍 21,411、自由 418,055、未知 267,976。
@@ -80,7 +80,7 @@ RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
 - AGX Orin 是当前唯一运行服务器；本机 WSL 仅用于编辑、测试与 Git 提交，不应再启动 28200 服务。每次提交后必须同步 Orin 并重启 `robot-map-planner.service`。
 - Orin 无法直连 Docker Registry；本轮曾以 SSH 反向转发接入本机 7897 代理，但为避免修改共享 Docker 守护进程，最终采用原生 Python/systemd 部署。后续如需 Docker 构建，应继续使用反向代理或由管理员配置守护进程代理。
 - 原生 Orin 的页面与测试已验收；完整目标 PCD 的 Orin 导入、编辑、发布、规划性能和资源指标仍待执行。
-- 当前 Orin 上 NavBridge `28180` 未监听，因此本轮只能验证离线错误保护，真实定位读取和机器人行走联调未执行；不得在无人监护时测试运动。
+- Orin NavBridge `28180` 已运行；当前位姿改由其 HTTP 接口提供。机器人运动仍未执行联调，不得在无人监护时测试运动。
 
 ## 注意事项
 

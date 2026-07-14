@@ -37,6 +37,36 @@ def test_current_pose_reports_offline_bridge() -> None:
     assert captured.value.code == "NAV_BRIDGE_OFFLINE"
 
 
+def test_current_pose_uses_nav_bridge_http_endpoint_by_default() -> None:
+    calls = []
+
+    def transport(method, path, form):
+        calls.append((method, path, form))
+        if path == "/health":
+            return {"ok": True}
+        return {**POSE, "localized": True, "age_seconds": 0.2}
+
+    client = NavBridgeClient("http://bridge", transport=transport)
+
+    pose = client.current_pose()
+
+    assert pose["x"] == 1.0
+    assert calls == [("GET", "/health", None), ("GET", "/current_pose", None)]
+
+
+def test_current_pose_reports_nav_bridge_not_localized() -> None:
+    def transport(method, path, form):
+        if path == "/health":
+            return {"ok": True}
+        return {"localized": False, "message": "current pose is stale"}
+
+    client = NavBridgeClient("http://bridge", transport=transport)
+
+    with pytest.raises(NavBridgeError, match="stale") as captured:
+        client.current_pose()
+    assert captured.value.code == "ROBOT_NOT_LOCALIZED"
+
+
 def test_path_rejects_robot_far_from_start() -> None:
     client = NavBridgeClient(
         "http://bridge",

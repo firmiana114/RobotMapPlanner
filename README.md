@@ -40,7 +40,7 @@ robot-map-planner --data-dir ./data plan ver_xxx --start 0 0 --start-yaw 0 \
 `mode` 默认为 `1`。网页中的朝向输入使用角度，并可直接下载仅包含完整点位序列的 JSON 数组。
 最终输出会折叠重复点和同向共线采样点，只保留起点、实际转向点和终点；底层仍保留安全采样用于验证线段不会穿越障碍。
 
-规划页面可复用同机 `RobotAbrainOffline` 的 NavBridge（默认 `http://127.0.0.1:28180`）：定位成功时“点击设置起点”直接读取 ROS2 `/current_pose`；规划完成后“按路径行走”会在安全确认和起点距离校验通过后，逐点调用 NavBridge。NavBridge 离线或没有定位消息时不会下发运动。
+规划页面可复用同机 `RobotAbrainOffline` 的 NavBridge（默认 `http://127.0.0.1:28180`）：定位成功时“点击设置起点”通过 NavBridge `GET /current_pose` 读取容器内 ROS2 `/current_pose`；规划完成后“按路径行走”会在安全确认和起点距离校验通过后，逐点调用 NavBridge。NavBridge 离线、没有定位消息或位姿过期时不会下发运动。
 
 ## Docker 与多架构
 

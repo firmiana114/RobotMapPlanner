@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import ast
 from datetime import datetime, timezone
 import json
 import logging
 import math
-import subprocess
 import threading
 import time
 from typing import Any, Callable
@@ -42,7 +40,7 @@ class NavBridgeClient:
         self.poll_interval = poll_interval
         self.start_tolerance = start_tolerance
         self._transport = transport or self._http_json
-        self._pose_reader = pose_reader or self._read_ros_pose
+        self._pose_reader = pose_reader
         self._lock = threading.Lock()
         self._execution: dict[str, Any] = {
             "status": "idle",
@@ -91,12 +89,22 @@ class NavBridgeClient:
     def current_pose(self) -> dict[str, Any]:
         self.health()
         try:
-            pose = dict(self._pose_reader(self.pose_timeout))
+            if self._pose_reader is not None:
+                pose = dict(self._pose_reader(self.pose_timeout))
+                pose.setdefault("localized", True)
+            else:
+                pose = dict(self._transport("GET", "/current_pose", None))
         except NavBridgeError:
             raise
         except Exception as exc:
-            LOGGER.exception("Failed to read robot pose from ROS2 current_pose topic")
+            LOGGER.exception("Failed to read robot pose from NavBridge current_pose endpoint")
             raise NavBridgeError("ROBOT_NOT_LOCALIZED", "robot localization pose is unavailable", status_code=409) from exc
+        if pose.get("localized") is not True:
+            raise NavBridgeError(
+                "ROBOT_NOT_LOCALIZED",
+                str(pose.get("message") or "robot localization has not produced a current pose"),
+                status_code=409,
+            )
         required = ("x", "y", "z", "ox", "oy", "oz", "ow")
         try:
             normalized = {key: float(pose[key]) for key in required}
@@ -110,48 +118,6 @@ class NavBridgeClient:
         normalized["localized"] = True
         LOGGER.info("Robot localization pose acquired x=%.3f y=%.3f", normalized["x"], normalized["y"])
         return normalized
-
-    @staticmethod
-    def _read_ros_pose(timeout: float) -> dict[str, Any]:
-        command = (
-            "source /opt/ros/humble/setup.bash >/dev/null 2>&1 && "
-            "ros2 topic echo --once /current_pose std_msgs/msg/String"
-        )
-        try:
-            completed = subprocess.run(
-                ["/bin/bash", "-lc", command],
-                capture_output=True,
-                text=True,
-                timeout=timeout,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            raise NavBridgeError(
-                "ROBOT_NOT_LOCALIZED", "robot localization has not produced a current pose", status_code=409
-            ) from exc
-        if completed.returncode != 0:
-            LOGGER.warning(
-                "ROS2 current_pose read failed returncode=%s stderr=%s",
-                completed.returncode,
-                completed.stderr.strip()[-300:],
-            )
-            raise NavBridgeError(
-                "ROBOT_NOT_LOCALIZED", "robot localization pose is unavailable", status_code=409
-            )
-        for line in completed.stdout.splitlines():
-            if not line.strip().startswith("data:"):
-                continue
-            raw = line.split(":", 1)[1].strip()
-            try:
-                encoded = ast.literal_eval(raw)
-                payload = json.loads(encoded)
-            except (SyntaxError, ValueError, json.JSONDecodeError, TypeError) as exc:
-                raise NavBridgeError(
-                    "ROBOT_NOT_LOCALIZED", "current_pose topic returned invalid pose data", status_code=409
-                ) from exc
-            if isinstance(payload, dict):
-                return payload
-        raise NavBridgeError("ROBOT_NOT_LOCALIZED", "current_pose topic returned no pose", status_code=409)
 
     def execution_status(self) -> dict[str, Any]:
         with self._lock:
