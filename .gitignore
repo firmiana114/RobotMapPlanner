@@ -8,3 +8,9 @@
 *.py[cod]
 *.log
 /=2.13,
+
+# macOS metadata
+.DS_Store
+
+# Odom CMake build outputs
+/Odom/build*/

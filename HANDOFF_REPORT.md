@@ -1,6 +1,6 @@
 # RobotMapPlanner 交接报告
 
-更新时间：2026-07-14（Asia/Singapore）
+更新时间：2026-07-15（Asia/Singapore）
 
 ## 项目整体描述
 
@@ -20,6 +20,7 @@
 - `Dockerfile`、`compose.yaml`、`scripts/`：CPU-only 双架构构建、运行和冒烟检查。
 - `deploy/robot-map-planner.service`：AGX Orin `/mnt/ssd/gt/RobotMapPlanner` 原生部署的用户级 systemd 单元。
 - `docs/FRONTEND_USER_GUIDE.md`：前端导入、编辑、规划、版本管理与故障处理操作指南。
+- `Odom/`：独立的 Unitree 里程计工具子项目；当前 `g1_odometer_probe` 通过 SDK2 DDS 订阅 G1 高频或低频里程计，内含 Linux `aarch64`/`x86_64` Unitree SDK2 依赖，后续计划扩展 Go2。
 
 ## 运行入口、配置与数据流
 
@@ -31,10 +32,12 @@
 - 关键依赖和构建配置位于 `pyproject.toml`、`CMakeLists.txt`、`Dockerfile`。
 - AGX Orin 运行入口为用户级 `robot-map-planner.service`，数据目录为项目下 `data/`，允许导入目录为项目下 `imports/`，服务地址为 `http://192.168.1.21:28200`。
 - NavBridge 默认地址为 `http://127.0.0.1:28180`，可用 `RMP_NAV_BRIDGE_URL` 及 `RMP_NAV_*` 超时、轮询、起点容差环境变量调整。
+- Odom 数据流：指定网卡与 DDS domain → 订阅 `rt/lf/odommodestate` 或 `rt/odommodestate` → 读取 `SportModeState_` → 按采样参数输出位置、速度、姿态和角速度。
 
 ## 当前状态与已验证事实
 
 - 独立首版的核心、服务、Web、CLI、测试和容器交付已实现。
+- 已纳入 `Odom` 子项目及其本地 Unitree SDK2；根 `.gitignore` 排除 `Odom/build*` CMake 构建目录和各层 `.DS_Store`，保留源码、配置及 SDK 的 Linux 预编译依赖。
 - 已补充与 0.1.0 实际界面一致的中文前端操作文档，包括当前 WSL 部署路径和 Draft 使用限制。
 - 本机与 Orin 的 CTest 均为 1/1、pytest 均为 18/18 通过。Orin 使用实时机器人起点、W1/W2 和终点完成真实规划 API 验证：返回 3 段，两个吸附途径点均按序存在于最终七元组中；未下发机器人运动。Orin `GET /api/v1/navigation/pose` 已通过 NavBridge HTTP 返回 `localized=true`；浏览器自动化仍因 `process` 属性冲突无法初始化，JavaScript 可视交互验收未完成。
 - Web 导入参数已增加必填、数值范围和“膨胀半径不得小于硬净空”校验；API、存储层和 C++ 核心会返回包含字段和值的明确错误，不再仅返回 `invalid costmap parameters`。
@@ -72,6 +75,8 @@ cmake --build build-ctest && ctest --test-dir build-ctest --output-on-failure
 pytest
 robot-map-planner serve --host 0.0.0.0 --port 28200
 RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
+cmake -S Odom -B Odom/build && cmake --build Odom/build
+./Odom/build/g1_odometer_probe <网卡> --topic lf --samples 5 --timeout 10
 ```
 
 ## 发布状态、阻塞问题与下一步
@@ -86,5 +91,6 @@ RMP_PLATFORMS=linux/amd64,linux/arm64 bash scripts/build_multiarch.sh
 ## 注意事项
 
 - 不要提交 PCD、运行数据库、日志、栅格二进制、虚拟环境或构建目录。
+- `Odom` 随附的 Unitree SDK2 预编译库是 Linux ELF 文件，macOS 无法直接链接；应在 Linux `aarch64`/`x86_64` 环境构建并通过可访问机器人 DDS 网络的网卡运行。
 - 发布必须经过验证，并保持“文件原子落盘 → SQLite 事务切换”；普通编辑不得改写已发布版本，参数重新编译必须创建独立地图，不得修改或删除源地图的版本、Draft 和人工编辑。
 - `binary_compressed` PCD 明确不支持，不能静默降级。
