@@ -4,10 +4,14 @@ from datetime import datetime, timezone
 import json
 import logging
 import math
+import os
+from pathlib import Path
+import tempfile
 import threading
 import time
 from typing import Any, Callable
 from urllib import error, parse, request
+import uuid
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,6 +24,63 @@ class NavBridgeError(RuntimeError):
         self.status_code = status_code
 
 
+def _polyline_length(points: list[dict[str, Any]]) -> float:
+    return sum(
+        math.hypot(float(current["x"]) - float(previous["x"]), float(current["y"]) - float(previous["y"]))
+        for previous, current in zip(points, points[1:])
+    )
+
+
+def _point_to_segment_distance(
+    x: float, y: float, start: dict[str, Any], end: dict[str, Any]
+) -> float:
+    start_x, start_y = float(start["x"]), float(start["y"])
+    delta_x, delta_y = float(end["x"]) - start_x, float(end["y"]) - start_y
+    length_squared = delta_x * delta_x + delta_y * delta_y
+    if length_squared <= 1e-18:
+        return math.hypot(x - start_x, y - start_y)
+    ratio = max(0.0, min(1.0, ((x - start_x) * delta_x + (y - start_y) * delta_y) / length_squared))
+    return math.hypot(x - (start_x + ratio * delta_x), y - (start_y + ratio * delta_y))
+
+
+def trajectory_metrics(
+    planned_points: list[dict[str, Any]], samples: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Measure actual samples against the planned polyline in their shared map frame."""
+    if len(planned_points) < 2 or not samples:
+        return {
+            "sample_count": len(samples),
+            "planned_length_m": _polyline_length(planned_points),
+            "actual_length_m": _polyline_length(samples),
+            "mean_error_m": None,
+            "rms_error_m": None,
+            "p95_error_m": None,
+            "max_error_m": None,
+            "endpoint_error_m": None,
+        }
+    errors = [
+        min(
+            _point_to_segment_distance(float(sample["x"]), float(sample["y"]), start, end)
+            for start, end in zip(planned_points, planned_points[1:])
+        )
+        for sample in samples
+    ]
+    ordered = sorted(errors)
+    p95_index = max(0, math.ceil(len(ordered) * 0.95) - 1)
+    endpoint = planned_points[-1]
+    last = samples[-1]
+    return {
+        "sample_count": len(samples),
+        "planned_length_m": _polyline_length(planned_points),
+        "actual_length_m": _polyline_length(samples),
+        "mean_error_m": sum(errors) / len(errors),
+        "rms_error_m": math.sqrt(sum(value * value for value in errors) / len(errors)),
+        "p95_error_m": ordered[p95_index],
+        "max_error_m": max(errors),
+        "endpoint_error_m": math.hypot(float(last["x"]) - float(endpoint["x"]), float(last["y"]) - float(endpoint["y"])),
+    }
+
+
 class NavBridgeClient:
     def __init__(
         self,
@@ -30,6 +91,9 @@ class NavBridgeClient:
         waypoint_timeout: float = 300.0,
         poll_interval: float = 0.5,
         start_tolerance: float = 0.75,
+        trajectory_dir: Path | None = None,
+        trajectory_sample_interval: float = 0.2,
+        trajectory_max_samples: int = 100000,
         transport: Callable[[str, str, dict[str, str] | None], dict[str, Any]] | None = None,
         pose_reader: Callable[[float], dict[str, Any]] | None = None,
     ) -> None:
@@ -39,9 +103,23 @@ class NavBridgeClient:
         self.waypoint_timeout = waypoint_timeout
         self.poll_interval = poll_interval
         self.start_tolerance = start_tolerance
+        self.trajectory_dir = trajectory_dir
+        self.trajectory_sample_interval = max(0.05, trajectory_sample_interval)
+        self.trajectory_max_samples = max(1, trajectory_max_samples)
         self._transport = transport or self._http_json
         self._pose_reader = pose_reader
         self._lock = threading.Lock()
+        self._trajectory_started_monotonic = 0.0
+        self._trajectory: dict[str, Any] = {
+            "id": None,
+            "status": "idle",
+            "source": "nav_bridge_current_pose",
+            "frame": "map",
+            "planned_points": [],
+            "samples": [],
+            "started_at": None,
+            "ended_at": None,
+        }
         self._execution: dict[str, Any] = {
             "status": "idle",
             "message": "尚未下发路径",
@@ -86,8 +164,9 @@ class NavBridgeClient:
             raise NavBridgeError("NAV_BRIDGE_OFFLINE", "NavBridge health check did not report ready")
         return payload
 
-    def current_pose(self) -> dict[str, Any]:
-        self.health()
+    def _read_pose(self, *, check_health: bool, log_success: bool) -> dict[str, Any]:
+        if check_health:
+            self.health()
         try:
             if self._pose_reader is not None:
                 pose = dict(self._pose_reader(self.pose_timeout))
@@ -97,7 +176,6 @@ class NavBridgeClient:
         except NavBridgeError:
             raise
         except Exception as exc:
-            LOGGER.exception("Failed to read robot pose from NavBridge current_pose endpoint")
             raise NavBridgeError("ROBOT_NOT_LOCALIZED", "robot localization pose is unavailable", status_code=409) from exc
         if pose.get("localized") is not True:
             raise NavBridgeError(
@@ -116,8 +194,157 @@ class NavBridgeClient:
         if quaternion_norm < 1e-6:
             raise NavBridgeError("ROBOT_NOT_LOCALIZED", "robot orientation quaternion is invalid", status_code=409)
         normalized["localized"] = True
-        LOGGER.info("Robot localization pose acquired x=%.3f y=%.3f", normalized["x"], normalized["y"])
+        if log_success:
+            LOGGER.info("Robot localization pose acquired x=%.3f y=%.3f", normalized["x"], normalized["y"])
         return normalized
+
+    def current_pose(self) -> dict[str, Any]:
+        return self._read_pose(check_health=True, log_success=True)
+
+    def trajectory_snapshot(self, after_sequence: int = 0) -> dict[str, Any]:
+        with self._lock:
+            trajectory = self._trajectory
+            planned_points = [dict(point) for point in trajectory["planned_points"]]
+            all_samples = [dict(sample) for sample in trajectory["samples"]]
+            payload = {
+                key: trajectory[key]
+                for key in ("id", "status", "source", "frame", "started_at", "ended_at")
+            }
+        samples = [sample for sample in all_samples if int(sample["sequence"]) > after_sequence]
+        payload.update(
+            {
+                "latest_sequence": int(all_samples[-1]["sequence"]) if all_samples else 0,
+                "sample_count": len(all_samples),
+                "samples": samples,
+                "metrics": trajectory_metrics(planned_points, all_samples),
+            }
+        )
+        return payload
+
+    def _sample_from_pose(self, pose: dict[str, Any], sequence: int) -> dict[str, Any]:
+        yaw = math.atan2(
+            2 * (pose["ow"] * pose["oz"] + pose["ox"] * pose["oy"]),
+            1 - 2 * (pose["oy"] * pose["oy"] + pose["oz"] * pose["oz"]),
+        )
+        return {
+            "sequence": sequence,
+            "received_at": self._now(),
+            "elapsed_s": max(0.0, time.monotonic() - self._trajectory_started_monotonic),
+            "x": pose["x"],
+            "y": pose["y"],
+            "z": pose["z"],
+            "ox": pose["ox"],
+            "oy": pose["oy"],
+            "oz": pose["oz"],
+            "ow": pose["ow"],
+            "yaw": yaw,
+        }
+
+    def _begin_trajectory(self, points: list[dict[str, float]], initial_pose: dict[str, Any]) -> str:
+        trajectory_id = f"trajectory_{uuid.uuid4().hex}"
+        self._trajectory_started_monotonic = time.monotonic()
+        initial_sample = self._sample_from_pose(initial_pose, 1)
+        with self._lock:
+            self._trajectory = {
+                "id": trajectory_id,
+                "status": "recording",
+                "source": "nav_bridge_current_pose",
+                "frame": "map",
+                "planned_points": [dict(point) for point in points],
+                "samples": [initial_sample],
+                "started_at": self._now(),
+                "ended_at": None,
+            }
+        LOGGER.info(
+            "Trajectory recording started trajectory_id=%s planned_points=%s sample_interval_s=%.3f frame=map",
+            trajectory_id,
+            len(points),
+            self.trajectory_sample_interval,
+        )
+        return trajectory_id
+
+    def _sample_trajectory(self, trajectory_id: str, stop_event: threading.Event) -> None:
+        consecutive_failures = 0
+        while not stop_event.wait(self.trajectory_sample_interval):
+            try:
+                pose = self._read_pose(check_health=False, log_success=False)
+                with self._lock:
+                    if self._trajectory["id"] != trajectory_id or self._trajectory["status"] != "recording":
+                        return
+                    samples = self._trajectory["samples"]
+                    if len(samples) >= self.trajectory_max_samples:
+                        LOGGER.warning(
+                            "Trajectory sample limit reached trajectory_id=%s max_samples=%s",
+                            trajectory_id,
+                            self.trajectory_max_samples,
+                        )
+                        return
+                    samples.append(self._sample_from_pose(pose, len(samples) + 1))
+                if consecutive_failures:
+                    LOGGER.info(
+                        "Trajectory pose sampling recovered trajectory_id=%s missed_samples=%s",
+                        trajectory_id,
+                        consecutive_failures,
+                    )
+                    consecutive_failures = 0
+            except Exception:
+                consecutive_failures += 1
+                if consecutive_failures == 1:
+                    LOGGER.warning(
+                        "Trajectory pose sampling interrupted trajectory_id=%s",
+                        trajectory_id,
+                        exc_info=True,
+                    )
+
+    def _persist_trajectory(self, payload: dict[str, Any]) -> None:
+        if self.trajectory_dir is None:
+            return
+        self.trajectory_dir.mkdir(parents=True, exist_ok=True)
+        destination = self.trajectory_dir / f"{payload['id']}.json"
+        fd, temporary_name = tempfile.mkstemp(prefix=f".{payload['id']}.", suffix=".tmp", dir=self.trajectory_dir)
+        temporary = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as stream:
+                json.dump(payload, stream, ensure_ascii=False, separators=(",", ":"))
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, destination)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def _finalize_trajectory(self, trajectory_id: str) -> None:
+        execution = self.execution_status()
+        ended_at = self._now()
+        with self._lock:
+            if self._trajectory["id"] != trajectory_id:
+                return
+            planned_points = [dict(point) for point in self._trajectory["planned_points"]]
+            samples = [dict(sample) for sample in self._trajectory["samples"]]
+            payload = {
+                key: self._trajectory[key]
+                for key in ("id", "source", "frame", "started_at")
+            }
+            payload.update({"status": execution["status"], "ended_at": ended_at})
+        metrics = trajectory_metrics(planned_points, samples)
+        payload.update({"planned_points": planned_points, "samples": samples, "metrics": metrics})
+        try:
+            self._persist_trajectory(payload)
+        except Exception:
+            LOGGER.exception("Failed to persist trajectory trajectory_id=%s", trajectory_id)
+        with self._lock:
+            if self._trajectory["id"] == trajectory_id:
+                self._trajectory["status"] = execution["status"]
+                self._trajectory["ended_at"] = ended_at
+        LOGGER.info(
+            "Trajectory recording completed trajectory_id=%s status=%s samples=%s mean_error_m=%s max_error_m=%s",
+            trajectory_id,
+            execution["status"],
+            len(samples),
+            metrics["mean_error_m"],
+            metrics["max_error_m"],
+        )
 
     def execution_status(self) -> dict[str, Any]:
         with self._lock:
@@ -148,6 +375,7 @@ class NavBridgeClient:
                 status_code=409,
             )
         waypoints = normalized[1:]
+        trajectory_id = self._begin_trajectory(normalized, pose)
         now = self._now()
         with self._lock:
             self._execution = {
@@ -157,6 +385,7 @@ class NavBridgeClient:
                 "total_waypoints": len(waypoints),
                 "started_at": now,
                 "updated_at": now,
+                "trajectory_id": trajectory_id,
             }
         LOGGER.info(
             "Queued robot path waypoints=%s start_distance_m=%.3f bridge_url=%s",
@@ -164,8 +393,27 @@ class NavBridgeClient:
             start_distance,
             self.base_url,
         )
-        threading.Thread(target=self._execute_path, args=(waypoints,), daemon=True).start()
+        threading.Thread(
+            target=self._execute_path_with_trajectory,
+            args=(waypoints, trajectory_id),
+            daemon=True,
+        ).start()
         return self.execution_status()
+
+    def _execute_path_with_trajectory(self, waypoints: list[dict[str, float]], trajectory_id: str) -> None:
+        stop_event = threading.Event()
+        sampler = threading.Thread(
+            target=self._sample_trajectory,
+            args=(trajectory_id, stop_event),
+            daemon=True,
+        )
+        sampler.start()
+        try:
+            self._execute_path(waypoints)
+        finally:
+            stop_event.set()
+            sampler.join(timeout=max(1.0, self.trajectory_sample_interval * 2))
+            self._finalize_trajectory(trajectory_id)
 
     def _update_execution(self, **values: Any) -> None:
         with self._lock:

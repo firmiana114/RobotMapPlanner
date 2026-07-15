@@ -44,6 +44,8 @@ robot-map-planner --data-dir ./data plan ver_xxx --start 0 0 --start-yaw 0 \
 
 规划页面可复用同机 `RobotAbrainOffline` 的 NavBridge（默认 `http://127.0.0.1:28180`）：定位成功时“点击设置起点”通过 NavBridge `GET /current_pose` 读取容器内 ROS2 `/current_pose`；规划完成后“按路径行走”会在安全确认和起点距离校验通过后，逐点调用 NavBridge。NavBridge 离线、没有定位消息或位姿过期时不会下发运动。
 
+路径执行期间服务以默认 5 Hz 持续读取同一地图坐标位姿，在规划画布上用粉色折线实时叠加真实轨迹，并显示 RMS、P95 和最大横向偏差。每次执行生成独立轨迹编号，完整规划点、真实样本与统计结果会原子写入 `data/trajectories/trajectory_*.json`。可用 `RMP_NAV_TRAJECTORY_SAMPLE_INTERVAL` 调整采样间隔，用 `RMP_NAV_TRAJECTORY_MAX_SAMPLES` 限制单次轨迹样本数。
+
 ## Docker 与多架构
 
 ```bash
@@ -93,6 +95,7 @@ systemctl --user enable --now robot-map-planner.service
 - `POST /api/v1/versions/{version_id}/plan`
 - `GET /api/v1/navigation/pose`
 - `GET /api/v1/navigation/execution`
+- `GET /api/v1/navigation/trajectory?after_sequence={sequence}`（增量读取真实轨迹与偏差统计）
 - `POST /api/v1/navigation/follow-path`
 - `GET /healthz`
 

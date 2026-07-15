@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from robot_map_planner.navigation import NavBridgeClient, NavBridgeError
+from robot_map_planner.navigation import NavBridgeClient, NavBridgeError, trajectory_metrics
 
 
 POSE = {"x": 1.0, "y": 2.0, "z": 0.0, "ox": 0.0, "oy": 0.0, "oz": 0.0, "ow": 1.0}
@@ -115,3 +115,66 @@ def test_path_sends_each_waypoint_after_start_and_waits_for_success() -> None:
 
     assert client.execution_status()["status"] == "succeeded"
     assert sent == [(2.0, 2.0, 0.0, 0.0, 0.0, 1.0), (2.0, 3.0, 0.0, 0.0, 0.707, 0.707)]
+
+
+def test_trajectory_metrics_use_distance_to_planned_polyline() -> None:
+    metrics = trajectory_metrics(
+        [{"x": 0.0, "y": 0.0}, {"x": 2.0, "y": 0.0}],
+        [{"x": 0.0, "y": 1.0}, {"x": 1.0, "y": 1.0}, {"x": 2.0, "y": 1.0}],
+    )
+
+    assert metrics["sample_count"] == 3
+    assert metrics["planned_length_m"] == pytest.approx(2.0)
+    assert metrics["actual_length_m"] == pytest.approx(2.0)
+    assert metrics["mean_error_m"] == pytest.approx(1.0)
+    assert metrics["rms_error_m"] == pytest.approx(1.0)
+    assert metrics["p95_error_m"] == pytest.approx(1.0)
+    assert metrics["max_error_m"] == pytest.approx(1.0)
+    assert metrics["endpoint_error_m"] == pytest.approx(1.0)
+
+
+def test_path_records_and_persists_incremental_trajectory(tmp_path) -> None:
+    pose_count = 0
+
+    def pose_reader(timeout):
+        nonlocal pose_count
+        pose_count += 1
+        return {**POSE, "x": 1.0 + min(pose_count - 1, 10) * 0.05}
+
+    def transport(method, path, form):
+        if path == "/health":
+            return {"ok": True}
+        if path == "/go_to_async":
+            return {"success": True}
+        if path == "/go_to_status":
+            time.sleep(0.12)
+            return {"status": "3"}
+        return {"status": "0"}
+
+    client = NavBridgeClient(
+        "http://bridge",
+        transport=transport,
+        pose_reader=pose_reader,
+        poll_interval=0.001,
+        waypoint_timeout=1.0,
+        trajectory_dir=tmp_path,
+        trajectory_sample_interval=0.05,
+    )
+    queued = client.start_path(
+        [
+            {"x": 1.0, "y": 2.0, "ox": 0, "oy": 0, "oz": 0, "ow": 1},
+            {"x": 2.0, "y": 2.0, "ox": 0, "oy": 0, "oz": 0, "ow": 1},
+        ]
+    )
+    deadline = time.monotonic() + 2.0
+    while client.trajectory_snapshot()["status"] == "recording" and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    snapshot = client.trajectory_snapshot(after_sequence=1)
+    assert queued["trajectory_id"].startswith("trajectory_")
+    assert snapshot["id"] == queued["trajectory_id"]
+    assert snapshot["status"] == "succeeded"
+    assert snapshot["sample_count"] >= 2
+    assert all(sample["sequence"] > 1 for sample in snapshot["samples"])
+    assert snapshot["metrics"]["max_error_m"] == pytest.approx(0.0)
+    assert (tmp_path / f"{queued['trajectory_id']}.json").is_file()

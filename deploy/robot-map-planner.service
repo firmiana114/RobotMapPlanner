@@ -12,6 +12,8 @@ Environment=RMP_IMPORT_ROOTS=/mnt/ssd/gt/RobotMapPlanner/imports
 Environment=RMP_HOST=0.0.0.0
 Environment=RMP_PORT=28200
 Environment=RMP_NAV_BRIDGE_URL=http://127.0.0.1:28180
+Environment=RMP_NAV_TRAJECTORY_SAMPLE_INTERVAL=0.2
+Environment=RMP_NAV_TRAJECTORY_MAX_SAMPLES=100000
 ExecStart=/mnt/ssd/gt/RobotMapPlanner/.venv/bin/robot-map-planner serve --host 0.0.0.0 --port 28200
 Restart=always
 RestartSec=3

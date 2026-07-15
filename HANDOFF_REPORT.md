@@ -14,6 +14,7 @@
 - `src/robot_map_planner/storage.py`：SQLite 元数据、`RMP1` little-endian 栅格文件、原子写入、Draft revision、撤销/重做、发布、激活和规划入口。
 - `src/robot_map_planner/api.py`：FastAPI HTTP API、统一错误码、健康检查和静态网页。
 - `src/robot_map_planner/navigation.py`：RobotAbrainOffline NavBridge 健康检查、HTTP 当前位姿读取、起点安全校验和逐点路径执行状态机。
+- `src/robot_map_planner/navigation.py` 同时负责执行期地图位姿采样、轨迹会话、点到规划折线偏差统计与 `data/trajectories/` 原子持久化；前端以粉色折线实时叠加真实轨迹。
 - `src/robot_map_planner/static/`：深蓝离线 Web 编辑器，支持画刷、矩形、边界控制点、图层切换、版本、验证、发布和规划显示。
 - `src/robot_map_planner/cli.py`：`import|validate|plan|serve` 统一命令，与 HTTP 共用同一 C++ 核心和存储层。
 - `tests/`、`cpp/tests/`：API/存储与 C++ 算法测试。
@@ -33,13 +34,15 @@
 - AGX Orin 运行入口为用户级 `robot-map-planner.service`，数据目录为项目下 `data/`，允许导入目录为项目下 `imports/`，服务地址为 `http://192.168.1.21:28200`。
 - NavBridge 默认地址为 `http://127.0.0.1:28180`，可用 `RMP_NAV_BRIDGE_URL` 及 `RMP_NAV_*` 超时、轮询、起点容差环境变量调整。
 - Odom 数据流：指定网卡与 DDS domain → 订阅 `rt/lf/odommodestate` 或 `rt/odommodestate` → 读取 `SportModeState_` → 按采样参数输出位置、速度、姿态和角速度。
+- 真实轨迹数据流：A* 转向点折线 → NavBridge 下发导航 → 后端默认 5 Hz 读取 `map` 位姿 → 增量轨迹 API → 前端规划画布叠加 → RMS/P95/最大偏差与 JSON 会话文件。
 
 ## 当前状态与已验证事实
 
 - 独立首版的核心、服务、Web、CLI、测试和容器交付已实现。
 - 已纳入 `Odom` 子项目及其本地 Unitree SDK2；根 `.gitignore` 排除 `Odom/build*` CMake 构建目录和各层 `.DS_Store`，保留源码、配置及 SDK 的 Linux 预编译依赖。
+- 已实现路径执行期真实轨迹记录：前端增量显示实际轨迹和当前位置，后端计算平均、RMS、P95、最大及终点偏差；采样线程与逐点导航线程隔离，位姿短时中断会记录带异常链的首个 WARNING，恢复和会话汇总使用 INFO，单样本不写日志。
 - 已补充与 0.1.0 实际界面一致的中文前端操作文档，包括当前 WSL 部署路径和 Draft 使用限制。
-- 本机与 Orin 的 CTest 均为 1/1、pytest 均为 18/18 通过。Orin 使用实时机器人起点、W1/W2 和终点完成真实规划 API 验证：返回 3 段，两个吸附途径点均按序存在于最终七元组中；未下发机器人运动。Orin `GET /api/v1/navigation/pose` 已通过 NavBridge HTTP 返回 `localized=true`；浏览器自动化仍因 `process` 属性冲突无法初始化，JavaScript 可视交互验收未完成。
+- 本机与当前 `agx-orin` 的 CTest 均为 1/1、pytest 均为 20/20 通过；本地浏览器验收确认首页、静态资源、地图列表和轨迹 API 均为 HTTP 200，控制台无错误。历史 Orin 使用实时机器人起点、W1/W2 和终点完成真实规划 API 验证：返回 3 段，两个吸附途径点均按序存在于最终七元组中；未下发机器人运动。
 - Web 导入参数已增加必填、数值范围和“膨胀半径不得小于硬净空”校验；API、存储层和 C++ 核心会返回包含字段和值的明确错误，不再仅返回 `invalid costmap parameters`。
 - 分辨率使用 `min=0.01, step=0.01`，代价衰减使用 `min=0.5, step=0.5`；两者的默认值均与 HTML 原生步进基准对齐，不会再触发“请输入有效值”提示。
 - 地图导入页采用“先选择 PCD 或已导入地图，再编辑参数”的两阶段流程；未选择来源时参数区禁用。已导入地图会回填原始参数、默认追加“ `_参数版本` ”名称，并通过 `/api/v1/maps/{map_id}/recompile` 从保存的原始 PCD 创建独立地图；原地图、版本、Draft 和人工编辑保持不变。列表显示本地化创建时间，并提供带确认弹窗的删除按钮。
@@ -82,11 +85,11 @@ cmake -S Odom -B Odom/build && cmake --build Odom/build
 ## 发布状态、阻塞问题与下一步
 
 - GitHub 公开仓库已创建：`https://github.com/firmiana114/RobotMapPlanner`；本地 `main` 以该仓库为 `origin`。
-- AGX Orin SSH 别名为 `agx-orin`，主机地址为 `192.168.1.21`；源码、虚拟环境、数据和导入目录均位于 `/mnt/ssd/gt/RobotMapPlanner`。
-- AGX Orin 是当前唯一运行服务器；本机 WSL 仅用于编辑、测试与 Git 提交，不应再启动 28200 服务。每次提交后必须同步 Orin 并重启 `robot-map-planner.service`。
+- 2026-07-15 实际复核 `agx-orin` 解析到 `ubuntu.local`（`192.168.101.53`，用户 `pc`、`aarch64`）；项目已同步到 `/mnt/ssd/gt/RobotMapPlanner`，用户级 `robot-map-planner.service` 已 enabled/active，`/healthz` 与空闲轨迹 API 返回 HTTP 200。28180 运行 `humble_robot_agent_bridge`，当前 OpenAPI 没有 `/current_pose`，RobotMapPlanner 位姿 API 因上游 404 返回 `NAV_BRIDGE_REJECTED`/HTTP 503；真实轨迹联调必须先启动发布定位话题的导航工作流，并为当前 NavBridge 补齐 `/current_pose` HTTP 接口。
+- AGX Orin 是当前同步目标；本机仅用于编辑、测试与 Git 提交。每次提交后同步 Orin；只有服务器已安装 `robot-map-planner.service` 时才重启服务。
 - Orin 无法直连 Docker Registry；本轮曾以 SSH 反向转发接入本机 7897 代理，但为避免修改共享 Docker 守护进程，最终采用原生 Python/systemd 部署。后续如需 Docker 构建，应继续使用反向代理或由管理员配置守护进程代理。
 - 原生 Orin 的页面与测试已验收；完整目标 PCD 的 Orin 导入、编辑、发布、规划性能和资源指标仍待执行。
-- Orin NavBridge `28180` 已运行；当前位姿改由其 HTTP 接口提供。机器人运动仍未执行联调，不得在无人监护时测试运动。
+- Orin NavBridge `28180` 已运行，但当前版本尚未提供 `/current_pose` HTTP 接口；真实轨迹和机器人运动均未执行联调，不得在无人监护时测试运动。
 
 ## 注意事项
 

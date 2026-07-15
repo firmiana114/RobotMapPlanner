@@ -17,6 +17,8 @@ class Settings:
     nav_waypoint_timeout: float = 300.0
     nav_poll_interval: float = 0.5
     nav_start_tolerance: float = 0.75
+    nav_trajectory_sample_interval: float = 0.2
+    nav_trajectory_max_samples: int = 100000
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -34,4 +36,8 @@ class Settings:
             nav_waypoint_timeout=float(os.environ.get("RMP_NAV_WAYPOINT_TIMEOUT", "300.0")),
             nav_poll_interval=float(os.environ.get("RMP_NAV_POLL_INTERVAL", "0.5")),
             nav_start_tolerance=float(os.environ.get("RMP_NAV_START_TOLERANCE", "0.75")),
+            nav_trajectory_sample_interval=float(
+                os.environ.get("RMP_NAV_TRAJECTORY_SAMPLE_INTERVAL", "0.2")
+            ),
+            nav_trajectory_max_samples=int(os.environ.get("RMP_NAV_TRAJECTORY_MAX_SAMPLES", "100000")),
         )

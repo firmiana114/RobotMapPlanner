@@ -25,7 +25,22 @@ class FakeNavigationClient:
 
     def start_path(self, points):
         self.points = points
-        return {"status": "queued", "current_waypoint": 0, "total_waypoints": len(points) - 1}
+        return {
+            "status": "queued",
+            "current_waypoint": 0,
+            "total_waypoints": len(points) - 1,
+            "trajectory_id": "trajectory_test",
+        }
+
+    def trajectory_snapshot(self, after_sequence=0):
+        return {
+            "id": "trajectory_test",
+            "status": "recording",
+            "latest_sequence": 1,
+            "sample_count": 1,
+            "samples": [] if after_sequence >= 1 else [{"sequence": 1, "x": 1.25, "y": -0.5}],
+            "metrics": {"sample_count": 1, "max_error_m": 0.0},
+        }
 
 
 def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
@@ -67,6 +82,9 @@ def test_import_form_defaults_match_number_steps(tmp_path: Path) -> None:
     assert "prominent:true" in app_js
     assert "/api/v1/navigation/pose" in app_js
     assert "/api/v1/navigation/follow-path" in app_js
+    assert "/api/v1/navigation/trajectory?after_sequence=" in app_js
+    assert "actualTrajectory" in app_js
+    assert "RMS" in app_js
     assert "error.code=body?.error?.code" in app_js
     assert "机器人将按照当前规划路径实际移动" in app_js
     assert "waypoints:state.waypoints" in app_js
@@ -86,6 +104,7 @@ def test_navigation_api_uses_injected_client(tmp_path: Path) -> None:
     with TestClient(app) as client:
         pose = client.get("/api/v1/navigation/pose")
         execution = client.get("/api/v1/navigation/execution")
+        trajectory = client.get("/api/v1/navigation/trajectory?after_sequence=0")
         follow = client.post(
             "/api/v1/navigation/follow-path",
             json={"version_id": "ver_test", "points": points},
@@ -94,6 +113,7 @@ def test_navigation_api_uses_injected_client(tmp_path: Path) -> None:
     assert pose.status_code == 200
     assert pose.json()["localized"] is True
     assert execution.json()["status"] == "idle"
+    assert trajectory.json()["samples"][0]["sequence"] == 1
     assert follow.status_code == 202
     assert follow.json()["status"] == "queued"
     assert navigation.points == points

@@ -11,7 +11,7 @@ import tempfile
 import time
 from typing import Any
 
-from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -89,6 +89,9 @@ def create_app(settings: Settings | None = None, navigation_client: NavBridgeCli
         waypoint_timeout=settings.nav_waypoint_timeout,
         poll_interval=settings.nav_poll_interval,
         start_tolerance=settings.nav_start_tolerance,
+        trajectory_dir=settings.data_dir / "trajectories",
+        trajectory_sample_interval=settings.nav_trajectory_sample_interval,
+        trajectory_max_samples=settings.nav_trajectory_max_samples,
     )
 
     @asynccontextmanager
@@ -140,6 +143,10 @@ def create_app(settings: Settings | None = None, navigation_client: NavBridgeCli
     @app.get("/api/v1/navigation/execution")
     async def navigation_execution() -> dict[str, Any]:
         return navigation_client.execution_status()
+
+    @app.get("/api/v1/navigation/trajectory")
+    async def navigation_trajectory(after_sequence: int = Query(default=0, ge=0)) -> dict[str, Any]:
+        return navigation_client.trajectory_snapshot(after_sequence)
 
     @app.post("/api/v1/navigation/follow-path", status_code=202)
     async def follow_path(payload: FollowPathRequest) -> dict[str, Any]:
